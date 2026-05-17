@@ -1,0 +1,51 @@
+import ApplicationServices
+import CoreGraphics
+import Foundation
+
+enum PermissionController {
+    static func requestMissingPermissions() {
+        AppLogger.shared.log("requestMissingPermissions current=\(permissionSummary())")
+        requestAccessibilityIfNeeded()
+        requestScreenCaptureIfNeeded()
+    }
+
+    static func hasAccessibilityPermission() -> Bool {
+        AXIsProcessTrusted()
+    }
+
+    static func hasScreenCapturePermission() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    static func permissionSummary() -> String {
+        let accessibility = hasAccessibilityPermission()
+        let screenCapture = hasScreenCapturePermission()
+
+        switch (accessibility, screenCapture) {
+        case (true, true):
+            return "Ready"
+        case (false, false):
+            return "Enable Accessibility and Screen Recording"
+        case (false, true):
+            return "Enable Accessibility"
+        case (true, false):
+            return "Enable Screen Recording"
+        }
+    }
+
+    static func requestAccessibilityIfNeeded() {
+        guard !AXIsProcessTrusted() else { return }
+        AppLogger.shared.log("requestAccessibilityIfNeeded prompting")
+
+        let options = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    static func requestScreenCaptureIfNeeded() {
+        guard !CGPreflightScreenCaptureAccess() else { return }
+        AppLogger.shared.log("requestScreenCaptureIfNeeded prompting")
+        _ = CGRequestScreenCaptureAccess()
+    }
+}
