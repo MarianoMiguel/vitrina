@@ -1,10 +1,41 @@
 import Carbon
 import Foundation
 
-enum HotKeyAction {
-    case focusedWindow
-    case focusedMonitor
-    case clear
+enum HotKeyAction: Int, CaseIterable, Hashable {
+    case focusedWindow = 1
+    case focusedMonitor = 2
+    case clear = 3
+
+    var title: String {
+        switch self {
+        case .focusedWindow: "Focused Window"
+        case .focusedMonitor: "Focused Monitor"
+        case .clear: "Clear"
+        }
+    }
+
+    var storageKey: String {
+        switch self {
+        case .focusedWindow: "focusedWindow"
+        case .focusedMonitor: "focusedMonitor"
+        case .clear: "clear"
+        }
+    }
+
+    var defaultShortcut: HotKeyShortcut {
+        switch self {
+        case .focusedWindow:
+            HotKeyShortcut(keyCode: UInt32(kVK_ANSI_W), modifiers: UInt32(controlKey | optionKey))
+        case .focusedMonitor:
+            HotKeyShortcut(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(controlKey | optionKey))
+        case .clear:
+            HotKeyShortcut(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(controlKey | optionKey))
+        }
+    }
+
+    var hotKeyID: UInt32 {
+        UInt32(rawValue)
+    }
 }
 
 final class HotKeyController {
@@ -17,6 +48,7 @@ final class HotKeyController {
     }
 
     func register() throws {
+        unregister()
         AppLogger.shared.log("registering hotkeys")
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
@@ -57,9 +89,18 @@ final class HotKeyController {
             throw DynamicShareTargetError.hotKeyRegistrationFailed("InstallEventHandler returned \(status)")
         }
 
-        try registerHotKey(keyCode: UInt32(kVK_ANSI_W), id: 1, target: target)
-        try registerHotKey(keyCode: UInt32(kVK_ANSI_M), id: 2, target: target)
-        try registerHotKey(keyCode: UInt32(kVK_ANSI_C), id: 3, target: target)
+        do {
+            for action in HotKeyAction.allCases {
+                try registerHotKey(
+                    shortcut: HotKeyPreferences.shortcut(for: action),
+                    action: action,
+                    target: target
+                )
+            }
+        } catch {
+            unregister()
+            throw error
+        }
     }
 
     func unregister() {
@@ -76,15 +117,14 @@ final class HotKeyController {
         }
     }
 
-    private func registerHotKey(keyCode: UInt32, id: UInt32, target: EventTargetRef?) throws {
-        AppLogger.shared.log("registerHotKey id=\(id) keyCode=\(keyCode)")
+    private func registerHotKey(shortcut: HotKeyShortcut, action: HotKeyAction, target: EventTargetRef?) throws {
+        AppLogger.shared.log("registerHotKey action=\(action.storageKey) keyCode=\(shortcut.keyCode) modifiers=\(shortcut.modifiers)")
         var hotKeyRef: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: fourCharCode("DST1"), id: id)
-        let modifiers = UInt32(controlKey | optionKey)
+        let hotKeyID = EventHotKeyID(signature: fourCharCode("DST1"), id: action.hotKeyID)
 
         let status = RegisterEventHotKey(
-            keyCode,
-            modifiers,
+            shortcut.keyCode,
+            shortcut.modifiers,
             hotKeyID,
             target,
             OptionBits(kEventHotKeyExclusive),
@@ -92,26 +132,21 @@ final class HotKeyController {
         )
 
         guard status == noErr else {
-            throw DynamicShareTargetError.hotKeyRegistrationFailed("RegisterEventHotKey \(id) returned \(status)")
+            throw DynamicShareTargetError.hotKeyRegistrationFailed("RegisterEventHotKey \(action.title) returned \(status)")
         }
 
         refs.append(hotKeyRef)
     }
 
     private func handle(id: UInt32) {
-        NSLog("Dynamic Share Target hotkey pressed: \(id)")
+        NSLog("%@ hotkey pressed: %d", AppMetadata.productName, id)
         AppLogger.shared.log("hotkey pressed id=\(id)")
 
-        switch id {
-        case 1:
-            handler(.focusedWindow)
-        case 2:
-            handler(.focusedMonitor)
-        case 3:
-            handler(.clear)
-        default:
-            break
+        guard let action = HotKeyAction(rawValue: Int(id)) else {
+            return
         }
+
+        handler(action)
     }
 }
 

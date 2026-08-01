@@ -5,6 +5,14 @@ import ScreenCaptureKit
 struct WindowTarget {
     let window: SCWindow
 
+    var captureSize: CGSize {
+        window.frame.size
+    }
+
+    var captureFrame: CGRect {
+        window.frame
+    }
+
     var description: String {
         let appName = window.owningApplication?.applicationName ?? "window"
         if let title = window.title, !title.isEmpty {
@@ -17,6 +25,14 @@ struct WindowTarget {
 struct DisplayTarget {
     let display: SCDisplay
     let excludedCurrentApplication: SCRunningApplication?
+
+    var captureSize: CGSize {
+        display.frame.size
+    }
+
+    var captureFrame: CGRect {
+        display.frame
+    }
 
     var description: String {
         "display \(display.displayID)"
@@ -31,6 +47,7 @@ final class ShareTargetResolver {
 
         if PermissionController.hasAccessibilityPermission(),
            let focusedInfo = try? focusedAXWindowInfo(),
+           focusedInfo.processID != ProcessInfo.processInfo.processIdentifier,
            let window = bestWindowMatch(
                for: focusedInfo,
                in: candidateWindows(in: content, processID: focusedInfo.processID)
@@ -66,6 +83,7 @@ final class ShareTargetResolver {
 
         if PermissionController.hasAccessibilityPermission(),
            let focusedInfo = try? focusedAXWindowInfo(),
+           focusedInfo.processID != ProcessInfo.processInfo.processIdentifier,
            let frame = focusedInfo.frame,
            let display = display(containing: frame.center, displays: displays) {
             AppLogger.shared.log("resolver.focusedDisplay selected AX frame=\(frame) displayID=\(display.displayID)")
@@ -190,8 +208,10 @@ final class ShareTargetResolver {
     }
 
     private func candidateWindows(in content: SCShareableContent, processID: pid_t) -> [SCWindow] {
-        content.windows
+        let ownProcessID = ProcessInfo.processInfo.processIdentifier
+        return content.windows
             .filter { $0.owningApplication?.processID == processID }
+            .filter { $0.owningApplication?.processID != ownProcessID }
             .filter { $0.isOnScreen }
             .filter { $0.windowLayer == 0 }
     }
@@ -374,14 +394,5 @@ private struct CGWindowInfo {
             return number.uint32Value
         }
         return nil
-    }
-}
-
-private extension NSScreen {
-    var displayID: CGDirectDisplayID? {
-        guard let number = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-            return nil
-        }
-        return CGDirectDisplayID(number.uint32Value)
     }
 }

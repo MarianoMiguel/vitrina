@@ -34,6 +34,8 @@
 @property(nonatomic, strong) CGVirtualDisplay *display;
 @property(nonatomic, readwrite) NSUInteger width;
 @property(nonatomic, readwrite) NSUInteger height;
+@property(nonatomic) NSUInteger maxWidth;
+@property(nonatomic) NSUInteger maxHeight;
 @end
 
 @implementation DSTVirtualDisplay
@@ -41,6 +43,8 @@
 - (nullable instancetype)initWithName:(NSString *)name
                                 width:(NSUInteger)width
                                height:(NSUInteger)height
+                             maxWidth:(NSUInteger)maxWidth
+                            maxHeight:(NSUInteger)maxHeight
                        pixelsPerInch:(NSUInteger)pixelsPerInch
                               highDPI:(BOOL)highDPI {
     self = [super init];
@@ -49,11 +53,9 @@
     }
 
     Class descriptorClass = NSClassFromString(@"CGVirtualDisplayDescriptor");
-    Class settingsClass = NSClassFromString(@"CGVirtualDisplaySettings");
-    Class modeClass = NSClassFromString(@"CGVirtualDisplayMode");
     Class displayClass = NSClassFromString(@"CGVirtualDisplay");
 
-    if (!descriptorClass || !settingsClass || !modeClass || !displayClass) {
+    if (!descriptorClass || !displayClass) {
         return nil;
     }
 
@@ -64,7 +66,7 @@
     descriptor.maxPixelsHigh = (uint32_t)height;
     descriptor.vendorID = 0x445354;
     descriptor.productID = 1;
-    descriptor.serialNum = 1;
+    descriptor.serialNum = arc4random();
     descriptor.sizeInMillimeters = CGSizeMake(25.4 * width / pixelsPerInch, 25.4 * height / pixelsPerInch);
 
     descriptor.whitePoint = CGPointMake(0.3125, 0.3291);
@@ -77,22 +79,46 @@
         return nil;
     }
 
-    NSUInteger modeWidth = highDPI ? width / 2 : width;
-    NSUInteger modeHeight = highDPI ? height / 2 : height;
-    CGVirtualDisplayMode *mode = [[modeClass alloc] initWithWidth:modeWidth height:modeHeight refreshRate:60.0];
-    CGVirtualDisplaySettings *settings = [[settingsClass alloc] init];
-    settings.hiDPI = highDPI;
-    settings.modes = @[mode];
+    _display = display;
+    _maxWidth = width;
+    _maxHeight = height;
 
-    if (![display applySettings:settings]) {
+    if (![self resizeToWidth:width height:height highDPI:highDPI]) {
         return nil;
     }
 
-    _display = display;
+    return self;
+}
+
+- (BOOL)resizeToWidth:(NSUInteger)width
+               height:(NSUInteger)height
+              highDPI:(BOOL)highDPI {
+    Class settingsClass = NSClassFromString(@"CGVirtualDisplaySettings");
+    Class modeClass = NSClassFromString(@"CGVirtualDisplayMode");
+
+    if (!settingsClass || !modeClass || !self.display) {
+        return NO;
+    }
+
+    NSUInteger modeWidth = highDPI ? width / 2 : width;
+    NSUInteger modeHeight = highDPI ? height / 2 : height;
+    CGVirtualDisplayMode *mode = [[modeClass alloc] initWithWidth:modeWidth height:modeHeight refreshRate:60.0];
+    CGVirtualDisplayMode *maxMode = [[modeClass alloc] initWithWidth:self.maxWidth height:self.maxHeight refreshRate:60.0];
+    CGVirtualDisplaySettings *settings = [[settingsClass alloc] init];
+    settings.hiDPI = highDPI;
+    if (width == self.maxWidth && height == self.maxHeight) {
+        settings.modes = @[mode];
+    } else {
+        settings.modes = @[mode, maxMode];
+    }
+
+    if (![self.display applySettings:settings]) {
+        return NO;
+    }
+
     _width = width;
     _height = height;
-
-    return self;
+    return YES;
 }
 
 - (CGDirectDisplayID)displayID {

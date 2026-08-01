@@ -1,8 +1,13 @@
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
 
 enum PermissionController {
+    static var isReady: Bool {
+        hasAccessibilityPermission() && hasScreenCapturePermission()
+    }
+
     static func requestMissingPermissions() {
         AppLogger.shared.log("requestMissingPermissions current=\(permissionSummary())")
         requestAccessibilityIfNeeded()
@@ -47,5 +52,22 @@ enum PermissionController {
         guard !CGPreflightScreenCaptureAccess() else { return }
         AppLogger.shared.log("requestScreenCaptureIfNeeded prompting")
         _ = CGRequestScreenCaptureAccess()
+    }
+
+    static func openAccessibilitySettings() {
+        openPrivacySettings(anchor: "Privacy_Accessibility")
+    }
+
+    static func openScreenRecordingSettings() {
+        openPrivacySettings(anchor: "Privacy_ScreenCapture")
+    }
+
+    private static func openPrivacySettings(anchor: String) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
+            return
+        }
+
+        AppLogger.shared.log("openPrivacySettings anchor=\(anchor)")
+        NSWorkspace.shared.open(url)
     }
 }

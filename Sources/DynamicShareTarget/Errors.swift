@@ -9,6 +9,7 @@ enum DynamicShareTargetError: LocalizedError {
     case virtualDisplayUnavailable
     case virtualDisplayScreenUnavailable
     case hotKeyRegistrationFailed(String)
+    case launchAtLoginUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +29,8 @@ enum DynamicShareTargetError: LocalizedError {
             return "The virtual display was created, but macOS did not expose it as a screen."
         case .hotKeyRegistrationFailed(let details):
             return "Could not register global hotkeys: \(details)"
+        case .launchAtLoginUnavailable:
+            return "Launch at Login requires macOS 13 or later."
         }
     }
 }

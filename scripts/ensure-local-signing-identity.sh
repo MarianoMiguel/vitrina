@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STORE="$ROOT/.local-codesign"
-KEYCHAIN="$STORE/DynamicShareTarget.keychain"
-CERT_NAME="Dynamic Share Target Local"
+KEYCHAIN="$STORE/PeekPortal.keychain-db"
+CERT_NAME="PeekPortal Local"
 PASSWORD_FILE="$STORE/password"
 OPENSSL_CONFIG="$STORE/openssl.cnf"
 CERT_PEM="$STORE/cert.pem"
@@ -21,7 +21,14 @@ fi
 
 PASSWORD="$(cat "$PASSWORD_FILE")"
 
-if [[ ! -f "$KEYCHAIN" || ! -f "$P12" ]]; then
+identity_count() {
+  { security find-identity -v -p codesigning "$KEYCHAIN" 2>/dev/null || true; } |
+    awk '/valid identities found/ { print $1; found=1 } END { if (!found) print 0 }'
+}
+
+if [[ ! -f "$KEYCHAIN" || ! -f "$P12" || "$(identity_count)" == "0" ]]; then
+  rm -f "$KEYCHAIN"
+
   cat > "$OPENSSL_CONFIG" <<EOF
 [req]
 distinguished_name=req_distinguished_name

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUNDLE_ID="dev.mariano.dynamic-share-target"
+BUNDLE_IDS=(
+  "computer.interstellar.peekportal"
+  "dev.mariano.dynamic-share-target"
+)
 
-tccutil reset Accessibility "$BUNDLE_ID" || true
-tccutil reset ScreenCapture "$BUNDLE_ID" || true
+for BUNDLE_ID in "${BUNDLE_IDS[@]}"; do
+  tccutil reset Accessibility "$BUNDLE_ID" || true
+  tccutil reset ScreenCapture "$BUNDLE_ID" || true
+done
 
-echo "Reset Accessibility and Screen Recording decisions for $BUNDLE_ID"
+echo "Reset Accessibility and Screen Recording decisions for PeekPortal bundle IDs"

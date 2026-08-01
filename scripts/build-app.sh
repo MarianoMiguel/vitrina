@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Dynamic Share Target"
+APP_NAME="PeekPortal"
 CONFIG="${CONFIGURATION:-debug}"
-SIGN_IDENTITY="${SIGN_IDENTITY:-Dynamic Share Target Local}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-PeekPortal Local}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/dist}"
 
 export CLANG_MODULE_CACHE_PATH="$ROOT/.build/clang-module-cache"
@@ -17,7 +17,7 @@ APP="$OUTPUT_DIR/$APP_NAME.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/dynamic-share-target"
+cp "$BIN" "$APP/Contents/MacOS/peekportal"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 if command -v codesign >/dev/null 2>&1; then

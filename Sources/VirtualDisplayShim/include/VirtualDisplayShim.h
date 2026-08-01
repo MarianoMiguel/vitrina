@@ -15,8 +15,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable instancetype)initWithName:(NSString *)name
                                 width:(NSUInteger)width
                                height:(NSUInteger)height
+                             maxWidth:(NSUInteger)maxWidth
+                            maxHeight:(NSUInteger)maxHeight
                        pixelsPerInch:(NSUInteger)pixelsPerInch
                               highDPI:(BOOL)highDPI NS_DESIGNATED_INITIALIZER;
+
+- (BOOL)resizeToWidth:(NSUInteger)width
+               height:(NSUInteger)height
+              highDPI:(BOOL)highDPI;
 
 @end
 

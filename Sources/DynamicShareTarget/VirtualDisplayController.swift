@@ -3,9 +3,15 @@ import VirtualDisplayShim
 
 @MainActor
 final class VirtualDisplayController {
+    private static let initialSize = CGSize(width: 1920, height: 1080)
+    private static let maximumSize = CGSize(width: 1920, height: 1080)
+    private static let minimumSize = CGSize(width: 640, height: 360)
+
+    private let name: String
     private let display: DSTVirtualDisplay
     private var window: NSWindow?
     private var renderer: CaptureRendererView?
+    private var currentSize: CGSize
 
     var displayID: CGDirectDisplayID {
         display.displayID
@@ -17,13 +23,17 @@ final class VirtualDisplayController {
             name: name,
             width: UInt(width),
             height: UInt(height),
+            maxWidth: UInt(Self.maximumSize.width),
+            maxHeight: UInt(Self.maximumSize.height),
             pixelsPerInch: 110,
             highDPI: false
         ) else {
             throw DynamicShareTargetError.virtualDisplayUnavailable
         }
 
+        self.name = name
         self.display = display
+        self.currentSize = CGSize(width: width, height: height)
         AppLogger.shared.log("VirtualDisplayController created displayID=\(display.displayID)")
     }
 
@@ -40,7 +50,9 @@ final class VirtualDisplayController {
             AppLogger.shared.log("prepareTargetWindow screen frame=\(screen.frame)")
 
             let renderer = CaptureRendererView(frame: NSRect(origin: .zero, size: screen.frame.size))
-            let window = TargetWindow(
+            renderer.autoresizingMask = [.width, .height]
+
+            let window = VirtualDisplayTargetWindow(
                 contentRect: screen.frame,
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
@@ -48,12 +60,13 @@ final class VirtualDisplayController {
                 screen: screen
             )
 
-            window.title = "Dynamic Share Target"
+            window.title = self.name
             window.contentView = renderer
             window.backgroundColor = .black
             window.isOpaque = true
             window.hasShadow = false
             window.ignoresMouseEvents = true
+            window.hidesOnDeactivate = false
             window.level = .normal
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.setFrame(screen.frame, display: true)
@@ -65,35 +78,147 @@ final class VirtualDisplayController {
         }
     }
 
-    private func waitForScreen(attemptsRemaining: Int, completion: @escaping (NSScreen?) -> Void) {
-        if let screen = screenForDisplayID(display.displayID) {
-            AppLogger.shared.log("waitForScreen found displayID=\(display.displayID) frame=\(screen.frame)")
-            completion(screen)
+    func resizeTarget(to requestedSize: CGSize, reason: String, completion: @escaping (CGSize) -> Void) {
+        let targetSize = normalizedTargetSize(from: requestedSize)
+        AppLogger.shared.log("resizeTarget reason=\(reason) requested=\(requestedSize) normalized=\(targetSize) current=\(currentSize)")
+
+        guard abs(targetSize.width - currentSize.width) >= 1 || abs(targetSize.height - currentSize.height) >= 1 else {
+            refreshTargetWindow(reason: "already sized \(reason)", expectedSize: targetSize) { [weak self] resolvedSize in
+                guard let self else { return }
+                let outputSize = resolvedSize ?? self.currentSize
+                self.currentSize = outputSize
+                completion(outputSize)
+            }
             return
         }
 
-        guard attemptsRemaining > 0 else {
-            AppLogger.shared.log("waitForScreen exhausted displayID=\(display.displayID)")
-            completion(nil)
+        guard display.resize(toWidth: UInt(targetSize.width), height: UInt(targetSize.height), highDPI: false) else {
+            AppLogger.shared.log("resizeTarget failed to apply virtual display mode; keeping current=\(currentSize)")
+            refreshTargetWindow(reason: "resize failed \(reason)", expectedSize: nil) { [weak self] resolvedSize in
+                guard let self else { return }
+                let outputSize = resolvedSize ?? self.currentSize
+                self.currentSize = outputSize
+                completion(outputSize)
+            }
             return
+        }
+
+        refreshTargetWindow(reason: reason, expectedSize: targetSize) { [weak self] resolvedSize in
+            guard let self else { return }
+            let outputSize = resolvedSize ?? targetSize
+            self.currentSize = outputSize
+            completion(outputSize)
+        }
+    }
+
+    private func waitForScreen(
+        attemptsRemaining: Int,
+        matching expectedSize: CGSize? = nil,
+        completion: @escaping (NSScreen?) -> Void
+    ) {
+        if let screen = screenForDisplayID(display.displayID) {
+            guard let expectedSize else {
+                AppLogger.shared.log("waitForScreen found displayID=\(display.displayID) frame=\(screen.frame)")
+                completion(screen)
+                return
+            }
+
+            if screen.frame.size.isApproximatelyEqual(to: expectedSize) {
+                AppLogger.shared.log("waitForScreen found displayID=\(display.displayID) frame=\(screen.frame)")
+                completion(screen)
+                return
+            }
+
+            guard attemptsRemaining > 0 else {
+                AppLogger.shared.log("waitForScreen exhausted waiting for size displayID=\(display.displayID) expected=\(expectedSize) actual=\(screen.frame.size)")
+                completion(screen)
+                return
+            }
+        } else {
+            guard attemptsRemaining > 0 else {
+                AppLogger.shared.log("waitForScreen exhausted displayID=\(display.displayID)")
+                completion(nil)
+                return
+            }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.waitForScreen(attemptsRemaining: attemptsRemaining - 1, completion: completion)
+            self?.waitForScreen(
+                attemptsRemaining: attemptsRemaining - 1,
+                matching: expectedSize,
+                completion: completion
+            )
+        }
+    }
+
+    private func refreshTargetWindow(
+        reason: String,
+        expectedSize: CGSize?,
+        completion: @escaping (CGSize?) -> Void
+    ) {
+        waitForScreen(attemptsRemaining: 12, matching: expectedSize) { [weak self] screen in
+            guard let self else { return }
+
+            if let screen {
+                AppLogger.shared.log("refreshTargetWindow reason=\(reason) screenFrame=\(screen.frame)")
+                self.window?.setFrame(screen.frame, display: true)
+                self.renderer?.frame = NSRect(origin: .zero, size: screen.frame.size)
+                self.window?.orderFrontRegardless()
+                completion(screen.frame.size)
+            } else {
+                AppLogger.shared.log("refreshTargetWindow reason=\(reason) failed to find resized screen")
+                completion(nil)
+            }
         }
     }
 
     private func screenForDisplayID(_ displayID: CGDirectDisplayID) -> NSScreen? {
         NSScreen.screens.first { screen in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-                return false
-            }
-            return CGDirectDisplayID(number.uint32Value) == displayID
+            screen.displayID == displayID
         }
+    }
+
+    private func normalizedTargetSize(from requestedSize: CGSize) -> CGSize {
+        guard requestedSize.width.isFinite,
+              requestedSize.height.isFinite,
+              requestedSize.width > 0,
+              requestedSize.height > 0 else {
+            return Self.initialSize
+        }
+
+        var width = requestedSize.width.rounded(.toNearestOrAwayFromZero)
+        var height = requestedSize.height.rounded(.toNearestOrAwayFromZero)
+
+        let downscale = min(
+            1,
+            Self.maximumSize.width / width,
+            Self.maximumSize.height / height
+        )
+        width *= downscale
+        height *= downscale
+
+        let upscale = max(
+            1,
+            Self.minimumSize.width / width,
+            Self.minimumSize.height / height
+        )
+        width *= upscale
+        height *= upscale
+
+        width = min(Self.maximumSize.width, max(1, width.rounded(.toNearestOrAwayFromZero)))
+        height = min(Self.maximumSize.height, max(1, height.rounded(.toNearestOrAwayFromZero)))
+
+        return CGSize(width: width, height: height)
     }
 }
 
-private final class TargetWindow: NSPanel {
+private extension CGSize {
+    func isApproximatelyEqual(to other: CGSize, tolerance: CGFloat = 1) -> Bool {
+        abs(width - other.width) <= tolerance && abs(height - other.height) <= tolerance
+    }
+}
+
+private final class VirtualDisplayTargetWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }

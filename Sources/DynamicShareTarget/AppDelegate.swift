@@ -2,12 +2,28 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let appName = "Dynamic Share Target"
+    private enum ShareMode: String {
+        case idle = "Idle"
+        case focusedWindow = "Focused Window"
+        case focusedMonitor = "Focused Monitor"
+        case clear = "Clear"
+        case testTarget = "Test Target"
+    }
+
+    private let appName = AppMetadata.productName
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
+    private var targetMenuItem: NSMenuItem?
+    private var focusedWindowMenuItem: NSMenuItem?
+    private var focusedMonitorMenuItem: NSMenuItem?
+    private var clearMenuItem: NSMenuItem?
     private var virtualDisplayController: VirtualDisplayController?
     private var captureController: CaptureController?
     private var hotKeyController: HotKeyController?
+    private var settingsWindowController: SettingsWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
+    private var currentStatus = "Starting"
+    private var currentMode: ShareMode = .idle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.shared.log("applicationDidFinishLaunching")
@@ -31,6 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     renderer: renderer,
                     outputSize: CGSize(width: 1920, height: 1080),
                     excludedDisplayIDs: [virtualDisplayController.displayID],
+                    resizeTarget: { requestedSize, reason, completion in
+                        virtualDisplayController.resizeTarget(
+                            to: requestedSize,
+                            reason: reason,
+                            completion: completion
+                        )
+                    },
                     statusHandler: { [weak self] status in
                         Task { @MainActor in self?.updateStatus(status) }
                     }
@@ -38,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.configureHotKeys()
                 renderer.showMessage(PermissionController.permissionSummary())
                 self.updateStatus(PermissionController.permissionSummary())
+                self.showOnboardingIfNeeded()
             }
         } catch {
             AppLogger.shared.log("virtual display failed error=\(error.localizedDescription)")
@@ -53,25 +77,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "DST"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let image = NSImage(
+            systemSymbolName: "rectangle.on.rectangle",
+            accessibilityDescription: appName
+        ) {
+            image.isTemplate = true
+            item.button?.image = image
+        } else {
+            item.button?.title = "PP"
+        }
+        item.button?.toolTip = appName
 
         let menu = NSMenu()
-        let statusItem = NSMenuItem(title: "Starting", action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        menu.addItem(statusItem)
+        let statusMenuItem = NSMenuItem(title: "Status: Starting", action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
+
+        let targetMenuItem = NSMenuItem(title: "Target: Idle", action: nil, keyEquivalent: "")
+        targetMenuItem.isEnabled = false
+        menu.addItem(targetMenuItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Share Focused Window   Ctrl+Option+W", action: #selector(shareFocusedWindow), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Share Focused Monitor   Ctrl+Option+M", action: #selector(shareFocusedMonitor), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Clear   Ctrl+Option+C", action: #selector(clearTarget), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Request Permissions", action: #selector(requestPermissions), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Copy Log Path", action: #selector(copyLogPath), keyEquivalent: ""))
+
+        let focusedWindowMenuItem = NSMenuItem(title: "", action: #selector(shareFocusedWindow), keyEquivalent: "")
+        focusedWindowMenuItem.target = self
+        menu.addItem(focusedWindowMenuItem)
+
+        let focusedMonitorMenuItem = NSMenuItem(title: "", action: #selector(shareFocusedMonitor), keyEquivalent: "")
+        focusedMonitorMenuItem.target = self
+        menu.addItem(focusedMonitorMenuItem)
+
+        let clearMenuItem = NSMenuItem(title: "", action: #selector(clearTarget), keyEquivalent: "")
+        clearMenuItem.target = self
+        menu.addItem(clearMenuItem)
+
+        let testItem = NSMenuItem(title: "Show Test Target", action: #selector(showTestTarget), keyEquivalent: "")
+        testItem.target = self
+        menu.addItem(testItem)
+
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let diagnosticsItem = NSMenuItem(title: "Copy Diagnostics", action: #selector(copyDiagnostics), keyEquivalent: "")
+        diagnosticsItem.target = self
+        menu.addItem(diagnosticsItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
+
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
 
         item.menu = menu
         self.statusItem = item
-        self.statusMenuItem = statusItem
+        self.statusMenuItem = statusMenuItem
+        self.targetMenuItem = targetMenuItem
+        self.focusedWindowMenuItem = focusedWindowMenuItem
+        self.focusedMonitorMenuItem = focusedMonitorMenuItem
+        self.clearMenuItem = clearMenuItem
+        refreshStatusMenu()
     }
 
     private func configureHotKeys() {
@@ -89,34 +153,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         do {
             try hotKeyController?.register()
-            NSLog("Dynamic Share Target hotkeys registered: Ctrl+Option+W/M/C")
-            AppLogger.shared.log("hotkeys registered Ctrl+Option+W/M/C")
+            let shortcutSummary = HotKeyAction.allCases
+                .map { "\($0.title)=\(HotKeyPreferences.shortcut(for: $0).displayString)" }
+                .joined(separator: ", ")
+            NSLog("%@ hotkeys registered: %@", AppMetadata.productName, shortcutSummary)
+            AppLogger.shared.log("hotkeys registered \(shortcutSummary)")
         } catch {
             updateStatus("Hotkey setup failed: \(error.localizedDescription)")
-            NSLog("Dynamic Share Target hotkey setup failed: \(error.localizedDescription)")
+            NSLog("%@ hotkey setup failed: %@", AppMetadata.productName, error.localizedDescription)
             AppLogger.shared.log("hotkey setup failed error=\(error.localizedDescription)")
         }
     }
 
     private func updateStatus(_ status: String) {
+        currentStatus = status
         AppLogger.shared.logStatus(status)
-        statusMenuItem?.title = status
-        statusItem?.button?.toolTip = status
+        refreshStatusMenu()
     }
 
     @objc private func shareFocusedWindow() {
         AppLogger.shared.log("menu/action shareFocusedWindow")
+        updateMode(.focusedWindow)
         captureController?.shareFocusedWindow()
     }
 
     @objc private func shareFocusedMonitor() {
         AppLogger.shared.log("menu/action shareFocusedMonitor")
+        updateMode(.focusedMonitor)
         captureController?.shareFocusedMonitor()
     }
 
     @objc private func clearTarget() {
         AppLogger.shared.log("menu/action clearTarget")
+        updateMode(.clear)
         captureController?.clear()
+    }
+
+    @objc private func showTestTarget() {
+        AppLogger.shared.log("menu/action showTestTarget")
+        updateMode(.testTarget)
+        captureController?.showTestPattern()
     }
 
     @objc private func requestPermissions() {
@@ -130,6 +206,218 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func copyLogPath() {
         AppLogger.shared.copyPathToPasteboard()
         updateStatus("Copied log path")
+    }
+
+    @objc private func copyDiagnostics() {
+        let diagnostics = makeDiagnosticsBundle()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnostics, forType: .string)
+        AppLogger.shared.log("copied diagnostics to pasteboard")
+        updateStatus("Copied diagnostics")
+    }
+
+    @objc private func openSettings() {
+        AppLogger.shared.log("menu/action openSettings")
+        DispatchQueue.main.async { [weak self] in
+            self?.showSettingsWindow()
+        }
+    }
+
+    private func showSettingsWindow() {
+        AppLogger.shared.log("showSettingsWindow begin")
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(
+                requestPermissions: { [weak self] in self?.requestPermissions() },
+                openAccessibilitySettings: {
+                    PermissionController.openAccessibilitySettings()
+                },
+                openScreenRecordingSettings: {
+                    PermissionController.openScreenRecordingSettings()
+                },
+                copyLogPath: { [weak self] in self?.copyLogPath() },
+                copyDiagnostics: { [weak self] in self?.copyDiagnostics() },
+                showTestTarget: { [weak self] in self?.showTestTarget() },
+                currentStatus: { [weak self] in self?.currentStatus ?? "Unknown" },
+                currentTarget: { [weak self] in self?.currentMode.rawValue ?? "Unknown" },
+                targetDisplayID: { [weak self] in self?.virtualDisplayController?.displayID },
+                launchAtLoginStatus: {
+                    LoginItemController.statusDescription
+                },
+                setLaunchAtLogin: { [weak self] enabled in
+                    self?.setLaunchAtLogin(enabled) ?? false
+                },
+                checkForUpdates: { completion in
+                    UpdateCheckController.checkForUpdates(completion: completion)
+                },
+                setShortcut: { [weak self] action, shortcut in
+                    self?.setShortcut(shortcut, for: action) ?? false
+                },
+                resetShortcut: { [weak self] action in
+                    self?.resetShortcut(for: action) ?? false
+                },
+                resetAllShortcuts: { [weak self] in
+                    self?.resetAllShortcuts() ?? false
+                },
+                suspendShortcuts: { [weak self] in
+                    self?.hotKeyController?.unregister()
+                },
+                resumeShortcuts: { [weak self] in
+                    self?.resumeShortcutsAfterRecording()
+                }
+            )
+        }
+        settingsWindowController?.show(excludingDisplayID: virtualDisplayController?.displayID)
+        AppLogger.shared.log("showSettingsWindow end")
+    }
+
+    private func setShortcut(_ shortcut: HotKeyShortcut, for action: HotKeyAction) -> Bool {
+        let previousShortcut = HotKeyPreferences.shortcut(for: action)
+        HotKeyPreferences.setShortcut(shortcut, for: action)
+
+        guard reloadHotKeysAfterShortcutChange(action: action, successStatus: "Updated \(action.title) shortcut") else {
+            HotKeyPreferences.setShortcut(previousShortcut, for: action)
+            _ = reloadHotKeysAfterShortcutChange(action: action, successStatus: nil)
+            return false
+        }
+
+        return true
+    }
+
+    private func resetShortcut(for action: HotKeyAction) -> Bool {
+        let previousShortcut = HotKeyPreferences.shortcut(for: action)
+        HotKeyPreferences.resetShortcut(for: action)
+
+        guard reloadHotKeysAfterShortcutChange(action: action, successStatus: "Reset \(action.title) shortcut") else {
+            HotKeyPreferences.setShortcut(previousShortcut, for: action)
+            _ = reloadHotKeysAfterShortcutChange(action: action, successStatus: nil)
+            return false
+        }
+
+        return true
+    }
+
+    private func resetAllShortcuts() -> Bool {
+        let previousShortcuts = Dictionary(
+            uniqueKeysWithValues: HotKeyAction.allCases.map { action in
+                (action, HotKeyPreferences.shortcut(for: action))
+            }
+        )
+        HotKeyPreferences.resetAllShortcuts()
+
+        guard reloadHotKeysAfterShortcutChange(action: .focusedWindow, successStatus: "Reset shortcuts") else {
+            for (action, shortcut) in previousShortcuts {
+                HotKeyPreferences.setShortcut(shortcut, for: action)
+            }
+            _ = reloadHotKeysAfterShortcutChange(action: .focusedWindow, successStatus: nil)
+            return false
+        }
+
+        refreshStatusMenu()
+        return true
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) -> Bool {
+        do {
+            try LoginItemController.setEnabled(enabled)
+            updateStatus(enabled ? "Launch at Login enabled" : "Launch at Login disabled")
+            return true
+        } catch {
+            updateStatus("Launch at Login failed: \(error.localizedDescription)")
+            AppLogger.shared.log("launch at login failed enabled=\(enabled) error=\(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func reloadHotKeysAfterShortcutChange(action: HotKeyAction, successStatus: String?) -> Bool {
+        do {
+            try hotKeyController?.register()
+            if let successStatus {
+                updateStatus(successStatus)
+            }
+            refreshStatusMenu()
+            return true
+        } catch {
+            let message = "\(action.title) shortcut unavailable: \(error.localizedDescription)"
+            AppLogger.shared.log("shortcut update failed action=\(action.storageKey) error=\(error.localizedDescription)")
+            updateStatus(message)
+            return false
+        }
+    }
+
+    private func resumeShortcutsAfterRecording() {
+        do {
+            try hotKeyController?.register()
+        } catch {
+            let message = "Hotkey setup failed: \(error.localizedDescription)"
+            updateStatus(message)
+            AppLogger.shared.log("hotkey resume failed error=\(error.localizedDescription)")
+        }
+    }
+
+    private func updateMode(_ mode: ShareMode) {
+        currentMode = mode
+        refreshStatusMenu()
+    }
+
+    private func refreshStatusMenu() {
+        statusMenuItem?.title = "Status: \(currentStatus)"
+        targetMenuItem?.title = "Target: \(currentMode.rawValue)"
+        focusedWindowMenuItem?.title = menuTitle(for: .focusedWindow, prefix: "Share")
+        focusedMonitorMenuItem?.title = menuTitle(for: .focusedMonitor, prefix: "Share")
+        clearMenuItem?.title = menuTitle(for: .clear, prefix: nil)
+        statusItem?.button?.toolTip = "\(currentMode.rawValue) - \(currentStatus)"
+        settingsWindowController?.refresh()
+    }
+
+    private func menuTitle(for action: HotKeyAction, prefix: String?) -> String {
+        let title = prefix.map { "\($0) \(action.title)" } ?? action.title
+        return "\(title)    \(HotKeyPreferences.shortcut(for: action).displayString)"
+    }
+
+    private func makeDiagnosticsBundle() -> String {
+        let shortcuts = HotKeyAction.allCases
+            .map { "- \($0.title): \(HotKeyPreferences.shortcut(for: $0).displayString)" }
+            .joined(separator: "\n")
+        let displayID = virtualDisplayController?.displayID.description ?? "unavailable"
+
+        return """
+        \(AppMetadata.productName) Diagnostics
+        Version: \(AppMetadata.versionString)
+        Build: \(AppMetadata.buildString)
+        Bundle ID: \(AppMetadata.bundleIdentifier)
+        Status: \(currentStatus)
+        Target: \(currentMode.rawValue)
+        Virtual Display ID: \(displayID)
+        Accessibility: \(PermissionController.hasAccessibilityPermission() ? "ready" : "missing")
+        Screen Recording: \(PermissionController.hasScreenCapturePermission() ? "ready" : "missing")
+        Launch at Login: \(LoginItemController.statusDescription)
+        Update Feed: \(AppMetadata.updateFeedURL.absoluteString)
+        Log Path: \(AppLogger.shared.logURL.path)
+
+        Shortcuts:
+        \(shortcuts)
+        """
+    }
+
+    private func showOnboardingIfNeeded() {
+        guard OnboardingWindowController.shouldShow else { return }
+
+        onboardingWindowController = OnboardingWindowController(
+            openAccessibilitySettings: {
+                PermissionController.openAccessibilitySettings()
+            },
+            openScreenRecordingSettings: {
+                PermissionController.openScreenRecordingSettings()
+            },
+            requestPermissions: { [weak self] in
+                self?.requestPermissions()
+            },
+            completion: { [weak self] in
+                self?.onboardingWindowController = nil
+                self?.updateStatus(PermissionController.permissionSummary())
+            }
+        )
+        onboardingWindowController?.show(excludingDisplayID: virtualDisplayController?.displayID)
     }
 
     @objc private func quit() {

@@ -14,7 +14,7 @@ final class AppLogger {
     private init() {
         let logsDirectory = FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/DynamicShareTarget", isDirectory: true)
+            .appendingPathComponent("Library/Logs/PeekPortal", isDirectory: true)
         self.logURL = logsDirectory.appendingPathComponent("debug.log")
         self.formatter = ISO8601DateFormatter()
         self.formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -72,7 +72,7 @@ final class AppLogger {
             try handle?.write(contentsOf: data)
             try handle?.synchronize()
         } catch {
-            NSLog("Dynamic Share Target logging failed: \(error.localizedDescription)")
+            NSLog("%@ logging failed: %@", AppMetadata.productName, error.localizedDescription)
         }
     }
 }
@@ -85,18 +85,18 @@ enum CrashReporter {
             AppLogger.shared.flush()
         }
 
-        signal(SIGABRT, dynamicShareTargetSignalHandler)
-        signal(SIGSEGV, dynamicShareTargetSignalHandler)
-        signal(SIGBUS, dynamicShareTargetSignalHandler)
-        signal(SIGILL, dynamicShareTargetSignalHandler)
-        signal(SIGTRAP, dynamicShareTargetSignalHandler)
+        signal(SIGABRT, peekPortalSignalHandler)
+        signal(SIGSEGV, peekPortalSignalHandler)
+        signal(SIGBUS, peekPortalSignalHandler)
+        signal(SIGILL, peekPortalSignalHandler)
+        signal(SIGTRAP, peekPortalSignalHandler)
 
         AppLogger.shared.log("crash reporter installed")
     }
 
 }
 
-private func dynamicShareTargetSignalHandler(_ signal: Int32) {
+private func peekPortalSignalHandler(_ signal: Int32) {
     AppLogger.shared.log("fatal signal=\(signal)")
     AppLogger.shared.log(Thread.callStackSymbols.joined(separator: "\n"))
     AppLogger.shared.flush()
