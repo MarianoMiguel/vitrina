@@ -39,10 +39,10 @@ The idea comes from [niri](https://github.com/niri-wm/niri)'s dynamic cast targe
   - Hide the menu bar (default on) — the focused app's name and your status icons stay private.
   - Block list: apps that never appear in a monitor share, even when on screen.
   - Allow-list mode: block everything except apps you pick; sharing an unlisted window offers to add it, optionally automatically.
-- **Honest cursor** — in window shares the pointer appears only while it's actually over the shared window.
+- **Precise cursor** — window shares show the pointer only while it's actually over the shared window.
 - **HiDPI output** — the virtual display runs at 2x and physically resizes to match the source's aspect ratio, so portrait windows aren't letterboxed into 16:9 and Retina text stays crisp (up to 3840×2160).
-- **Clean idle state** — when nothing is shared, participants see your wallpaper or a custom image, never a debug screen.
-- **Stage Manager, honestly** — macOS stops delivering frames for off-stage windows, so only the active window can be shown reliably; Vitrina says so in the menu and degrades window sharing to Follow Focus instead of freezing.
+- **Custom backdrop** — between shares, participants see your wallpaper or an image of your choice.
+- **Stage Manager aware** — macOS only delivers frames for on-stage windows, so when Stage Manager is on, Vitrina switches window sharing to Follow Focus automatically instead of letting the share freeze.
 
 ## Install
 
