@@ -24,7 +24,7 @@ struct WindowTarget {
 
 struct DisplayTarget {
     let display: SCDisplay
-    let excludedCurrentApplication: SCRunningApplication?
+    let applications: [SCRunningApplication]
 
     var captureSize: CGSize {
         display.frame.size
@@ -110,17 +110,13 @@ final class ShareTargetResolver {
         let content = try await shareableContent()
         let displays = content.displays.filter { !excludingDisplayIDs.contains($0.displayID) }
         AppLogger.shared.log("resolver.focusedDisplay content displays=\(content.displays.map { "\($0.displayID):\($0.frame)" }) filtered=\(displays.map { "\($0.displayID):\($0.frame)" }) windows=\(content.windows.count)")
-        let currentApp = content.applications.first {
-            $0.processID == ProcessInfo.processInfo.processIdentifier
-        }
-
         if PermissionController.hasAccessibilityPermission(),
            let focusedInfo = try? focusedAXWindowInfo(),
            focusedInfo.processID != ProcessInfo.processInfo.processIdentifier,
            let frame = focusedInfo.frame,
            let display = display(containing: frame.center, displays: displays) {
             AppLogger.shared.log("resolver.focusedDisplay selected AX frame=\(frame) displayID=\(display.displayID)")
-            return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+            return DisplayTarget(display: display, applications: content.applications)
         }
         AppLogger.shared.log("resolver.focusedDisplay AX path unavailable")
 
@@ -128,23 +124,23 @@ final class ShareTargetResolver {
            let window = topmostShareableWindow(in: content, processID: frontmostProcessID),
            let display = display(containing: window.frame.center, displays: displays) {
             AppLogger.shared.log("resolver.focusedDisplay selected frontmost pid=\(frontmostProcessID) windowID=\(window.windowID) displayID=\(display.displayID)")
-            return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+            return DisplayTarget(display: display, applications: content.applications)
         }
 
         if let window = topmostShareableWindow(in: content, processID: nil),
            let display = display(containing: window.frame.center, displays: displays) {
             AppLogger.shared.log("resolver.focusedDisplay selected global topmost windowID=\(window.windowID) displayID=\(display.displayID)")
-            return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+            return DisplayTarget(display: display, applications: content.applications)
         }
 
         if let display = displayContainingMouse(displays: displays) {
             AppLogger.shared.log("resolver.focusedDisplay selected mouse displayID=\(display.displayID)")
-            return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+            return DisplayTarget(display: display, applications: content.applications)
         }
 
         if let display = displays.first {
             AppLogger.shared.log("resolver.focusedDisplay selected first displayID=\(display.displayID)")
-            return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+            return DisplayTarget(display: display, applications: content.applications)
         }
 
         AppLogger.shared.log("resolver.focusedDisplay no display")
@@ -220,10 +216,7 @@ final class ShareTargetResolver {
             AppLogger.shared.log("resolver.display(withID:) missing displayID=\(displayID)")
             throw DynamicShareTargetError.selectedDisplayUnavailable
         }
-        let currentApp = content.applications.first {
-            $0.processID == ProcessInfo.processInfo.processIdentifier
-        }
-        return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
+        return DisplayTarget(display: display, applications: content.applications)
     }
 
     private var frontmostProcessID: pid_t? {

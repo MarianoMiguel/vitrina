@@ -51,6 +51,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let contentScrollView = NSScrollView()
     private let contentContainer = NSView()
     private let backgroundValue = NSTextField(labelWithString: "")
+    private let blockListValue = NSTextField(wrappingLabelWithString: "")
+    private let allowListValue = NSTextField(wrappingLabelWithString: "")
+    private var hideNotificationsButton: NSButton?
+    private var filterModePopUp: NSPopUpButton?
+    private var removeBlockedPopUp: NSPopUpButton?
+    private var removeAllowedPopUp: NSPopUpButton?
     private let permissionsValue = NSTextField(labelWithString: "")
     private let statusValue = NSTextField(labelWithString: "")
     private let targetValue = NSTextField(labelWithString: "")
@@ -156,6 +162,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         launchAtLoginButton?.state = LoginItemController.isEnabled ? .on : .off
         launchAtLoginButton?.title = "Launch at Login: \(launchAtLoginStatus())"
         backgroundValue.stringValue = PortalPreferences.customBackgroundURL?.lastPathComponent ?? "System wallpaper"
+        hideNotificationsButton?.state = PortalPreferences.hideNotificationsWhileSharing ? .on : .off
+        if let filterModePopUp {
+            let index = MonitorFilterMode.allCases.firstIndex(of: PortalPreferences.monitorFilterMode) ?? 0
+            if filterModePopUp.indexOfSelectedItem != index {
+                filterModePopUp.selectItem(at: index)
+            }
+        }
+        blockListValue.stringValue = Self.listSummary(PortalPreferences.blockedBundleIDs)
+        allowListValue.stringValue = Self.listSummary(PortalPreferences.allowedBundleIDs)
+        rebuildRemovePopUp(removeBlockedPopUp, ids: PortalPreferences.blockedBundleIDs, action: #selector(removeBlockedItem(_:)))
+        rebuildRemovePopUp(removeAllowedPopUp, ids: PortalPreferences.allowedBundleIDs, action: #selector(removeAllowedItem(_:)))
         for action in HotKeyAction.allCases where action != recordingAction {
             shortcutButtons[action]?.title = HotKeyPreferences.shortcut(for: action).displayString
         }
@@ -317,6 +334,46 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             ]
         ))
 
+        let hideNotifications = NSButton(
+            checkboxWithTitle: "Hide all notifications while sharing",
+            target: self,
+            action: #selector(hideNotificationsClicked(_:))
+        )
+        hideNotifications.state = PortalPreferences.hideNotificationsWhileSharing ? .on : .off
+        hideNotificationsButton = hideNotifications
+
+        let filterPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        MonitorFilterMode.allCases.forEach { filterPopUp.addItem(withTitle: $0.title) }
+        filterPopUp.target = self
+        filterPopUp.action = #selector(filterModeChanged(_:))
+        filterModePopUp = filterPopUp
+
+        let removeBlocked = NSPopUpButton(frame: .zero, pullsDown: true)
+        removeBlockedPopUp = removeBlocked
+        let removeAllowed = NSPopUpButton(frame: .zero, pullsDown: true)
+        removeAllowedPopUp = removeAllowed
+
+        blockListValue.preferredMaxLayoutWidth = 420
+        allowListValue.preferredMaxLayoutWidth = 420
+
+        stack.addArrangedSubview(SettingsSectionView(
+            title: "Monitor Sharing",
+            rows: [
+                SettingsRowView(label: "Notifications", valueView: hideNotifications),
+                SettingsRowView(label: "App Filter", valueView: filterPopUp),
+                SettingsRowView(label: "Block List", valueView: blockListValue),
+                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                    SettingsButton(title: "Add to Block List…", target: self, action: #selector(addBlockedClicked)),
+                    removeBlocked
+                ])),
+                SettingsRowView(label: "Allow List", valueView: allowListValue),
+                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                    SettingsButton(title: "Add to Allow List…", target: self, action: #selector(addAllowedClicked)),
+                    removeAllowed
+                ]))
+            ]
+        ))
+
         stack.addArrangedSubview(SettingsSectionView(
             title: "Permissions",
             rows: [
@@ -357,6 +414,88 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         refresh()
         return stack
+    }
+
+    @objc private func hideNotificationsClicked(_ sender: NSButton) {
+        PortalPreferences.hideNotificationsWhileSharing = sender.state == .on
+        AppLogger.shared.log("hideNotificationsWhileSharing=\(sender.state == .on)")
+    }
+
+    @objc private func filterModeChanged(_ sender: NSPopUpButton) {
+        let index = sender.indexOfSelectedItem
+        guard index >= 0, index < MonitorFilterMode.allCases.count else { return }
+        PortalPreferences.monitorFilterMode = MonitorFilterMode.allCases[index]
+        AppLogger.shared.log("monitorFilterMode=\(PortalPreferences.monitorFilterMode.rawValue)")
+        refresh()
+    }
+
+    @objc private func addBlockedClicked() {
+        pickApplications { PortalPreferences.addBlockedBundleID($0) }
+        refresh()
+    }
+
+    @objc private func addAllowedClicked() {
+        pickApplications { PortalPreferences.addAllowedBundleID($0) }
+        refresh()
+    }
+
+    @objc private func removeBlockedItem(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        PortalPreferences.removeBlockedBundleID(bundleID)
+        refresh()
+    }
+
+    @objc private func removeAllowedItem(_ sender: NSMenuItem) {
+        guard let bundleID = sender.representedObject as? String else { return }
+        PortalPreferences.removeAllowedBundleID(bundleID)
+        refresh()
+    }
+
+    private func pickApplications(_ add: (String) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.message = "Choose applications"
+
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let bundleID = Bundle(url: url)?.bundleIdentifier {
+                AppLogger.shared.log("app list add bundleID=\(bundleID)")
+                add(bundleID)
+            }
+        }
+    }
+
+    private func rebuildRemovePopUp(_ popUp: NSPopUpButton?, ids: [String], action: Selector) {
+        guard let popUp else { return }
+        let current = (1..<max(1, popUp.numberOfItems)).compactMap {
+            popUp.item(at: $0)?.representedObject as? String
+        }
+        popUp.isEnabled = !ids.isEmpty
+        guard current != ids else { return }
+
+        popUp.removeAllItems()
+        popUp.addItem(withTitle: "Remove…")
+        for bundleID in ids {
+            let item = NSMenuItem(title: Self.appDisplayName(for: bundleID), action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = bundleID
+            popUp.menu?.addItem(item)
+        }
+    }
+
+    private static func appDisplayName(for bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return bundleID
+        }
+        return (FileManager.default.displayName(atPath: url.path) as NSString).deletingPathExtension
+    }
+
+    private static func listSummary(_ ids: [String]) -> String {
+        ids.isEmpty ? "Empty" : ids.map(appDisplayName(for:)).joined(separator: ", ")
     }
 
     @objc private func chooseBackgroundClicked() {

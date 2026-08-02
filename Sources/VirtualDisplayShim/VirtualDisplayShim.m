@@ -101,20 +101,15 @@
     }
 
     // Widths/heights are pixel dimensions; CGVirtualDisplayMode takes point
-    // dimensions, so hiDPI modes are halved.
+    // dimensions, so hiDPI modes are halved. Offer ONLY the target mode:
+    // when the current mode stays in the list, macOS keeps it instead of
+    // switching, which silently defeats the resize.
     NSUInteger modeWidth = highDPI ? width / 2 : width;
     NSUInteger modeHeight = highDPI ? height / 2 : height;
-    NSUInteger maxModeWidth = highDPI ? self.maxWidth / 2 : self.maxWidth;
-    NSUInteger maxModeHeight = highDPI ? self.maxHeight / 2 : self.maxHeight;
     CGVirtualDisplayMode *mode = [[modeClass alloc] initWithWidth:modeWidth height:modeHeight refreshRate:60.0];
-    CGVirtualDisplayMode *maxMode = [[modeClass alloc] initWithWidth:maxModeWidth height:maxModeHeight refreshRate:60.0];
     CGVirtualDisplaySettings *settings = [[settingsClass alloc] init];
     settings.hiDPI = highDPI;
-    if (width == self.maxWidth && height == self.maxHeight) {
-        settings.modes = @[mode];
-    } else {
-        settings.modes = @[mode, maxMode];
-    }
+    settings.modes = @[mode];
 
     if (![self.display applySettings:settings]) {
         return NO;

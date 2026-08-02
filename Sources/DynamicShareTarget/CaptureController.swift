@@ -101,16 +101,12 @@ final class CaptureController: NSObject {
             do {
                 AppLogger.shared.log("shareFocusedMonitor resolving target")
                 let target = try await resolver.focusedDisplay(excludingDisplayIDs: excludedDisplayIDs)
-                AppLogger.shared.log("shareFocusedMonitor resolved displayID=\(target.display.displayID) frame=\(target.display.frame) excludedApp=\(target.excludedCurrentApplication?.applicationName ?? "nil")")
-                let filter = target.excludedCurrentApplication.map {
-                    SCContentFilter(display: target.display, excludingApplications: [$0], exceptingWindows: [])
-                } ?? SCContentFilter(display: target.display, excludingWindows: [])
-                AppLogger.shared.log("shareFocusedMonitor filter created")
+                AppLogger.shared.log("shareFocusedMonitor resolved displayID=\(target.display.displayID) frame=\(target.display.frame)")
 
                 await MainActor.run {
                     self.activeWindowID = nil
                     self.startCapture(
-                        filter: filter,
+                        filter: self.makeMonitorFilter(for: target),
                         sourceName: target.description,
                         sourceSize: target.captureSize,
                         cursorPolicy: .always
@@ -172,14 +168,11 @@ final class CaptureController: NSObject {
         Task {
             do {
                 let target = try await resolver.display(withID: displayID)
-                let filter = target.excludedCurrentApplication.map {
-                    SCContentFilter(display: target.display, excludingApplications: [$0], exceptingWindows: [])
-                } ?? SCContentFilter(display: target.display, excludingWindows: [])
 
                 await MainActor.run {
                     self.activeWindowID = nil
                     self.startCapture(
-                        filter: filter,
+                        filter: self.makeMonitorFilter(for: target),
                         sourceName: target.description,
                         sourceSize: target.captureSize,
                         cursorPolicy: .always
@@ -256,6 +249,30 @@ final class CaptureController: NSObject {
         statusHandler("Showing test target")
     }
 
+    /// Builds the monitor share filter from user preferences: the app itself
+    /// is always invisible, notifications are hidden by default, and the
+    /// allow/block lists narrow what participants can see.
+    private func makeMonitorFilter(for target: DisplayTarget) -> SCContentFilter {
+        let mode = PortalPreferences.monitorFilterMode
+        let hideNotifications = PortalPreferences.hideNotificationsWhileSharing
+        AppLogger.shared.log("makeMonitorFilter mode=\(mode.rawValue) hideNotifications=\(hideNotifications) blocked=\(PortalPreferences.blockedBundleIDs.count) allowed=\(PortalPreferences.allowedBundleIDs.count)")
+
+        if mode == .allowList {
+            let allowed = Set(PortalPreferences.allowedBundleIDs)
+            let apps = target.applications.filter { allowed.contains($0.bundleIdentifier) }
+            return SCContentFilter(display: target.display, including: apps, exceptingWindows: [])
+        }
+
+        let ownProcessID = ProcessInfo.processInfo.processIdentifier
+        let blocked = mode == .blockList ? Set(PortalPreferences.blockedBundleIDs) : []
+        let excluded = target.applications.filter { app in
+            app.processID == ownProcessID
+                || (hideNotifications && app.bundleIdentifier == "com.apple.notificationcenterui")
+                || blocked.contains(app.bundleIdentifier)
+        }
+        return SCContentFilter(display: target.display, excludingApplications: excluded, exceptingWindows: [])
+    }
+
     private func startCapture(
         filter: SCContentFilter,
         sourceName: String,
@@ -278,6 +295,7 @@ final class CaptureController: NSObject {
                     requestID: requestID,
                     filter: filter,
                     sourceName: sourceName,
+                    sourceSize: sourceSize,
                     outputSize: outputSize,
                     cursorPolicy: cursorPolicy
                 )
@@ -289,6 +307,7 @@ final class CaptureController: NSObject {
         requestID: Int,
         filter: SCContentFilter,
         sourceName: String,
+        sourceSize: CGSize,
         outputSize: CGSize,
         cursorPolicy: CursorPolicy
     ) {
@@ -297,11 +316,16 @@ final class CaptureController: NSObject {
             return
         }
 
-        AppLogger.shared.log("startCaptureAfterResize requestID=\(requestID) source=\(sourceName) outputSize=\(outputSize)")
+        // Size the stream to the SOURCE aspect fitted into the display, not
+        // to the display itself: if a display resize ever fails, a mismatched
+        // buffer would make ScreenCaptureKit anchor the content top-left.
+        // With a source-aspect buffer the renderer letterboxes it centered.
+        let streamSize = Self.streamSize(for: sourceSize, fitting: outputSize)
+        AppLogger.shared.log("startCaptureAfterResize requestID=\(requestID) source=\(sourceName) outputSize=\(outputSize) streamSize=\(streamSize)")
 
         let configuration = SCStreamConfiguration()
-        configuration.width = Int((outputSize.width * pixelScale).rounded())
-        configuration.height = Int((outputSize.height * pixelScale).rounded())
+        configuration.width = Int((streamSize.width * pixelScale).rounded())
+        configuration.height = Int((streamSize.height * pixelScale).rounded())
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.scalesToFit = true
@@ -404,6 +428,18 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("cursor updateConfiguration failed error=\(error.localizedDescription)")
             }
         }
+    }
+
+    private static func streamSize(for sourceSize: CGSize, fitting outputSize: CGSize) -> CGSize {
+        guard sourceSize.width > 0, sourceSize.height > 0,
+              sourceSize.width.isFinite, sourceSize.height.isFinite else {
+            return outputSize
+        }
+        let scale = min(outputSize.width / sourceSize.width, outputSize.height / sourceSize.height, 1)
+        return CGSize(
+            width: max(1, (sourceSize.width * scale).rounded()),
+            height: max(1, (sourceSize.height * scale).rounded())
+        )
     }
 
     private static func shouldShowCursor(for policy: CursorPolicy) -> Bool {

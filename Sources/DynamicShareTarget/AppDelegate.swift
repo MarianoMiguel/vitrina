@@ -77,6 +77,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 renderer.showBackground()
                 self.updateStatus(PermissionController.permissionSummary())
                 self.showOnboardingIfNeeded()
+
+                // Diagnostic hook: PEEKPORTAL_TEST_RESIZE=WxH exercises the
+                // virtual display resize without needing a capture source.
+                if let spec = ProcessInfo.processInfo.environment["PEEKPORTAL_TEST_RESIZE"] {
+                    let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
+                    if parts.count == 2 {
+                        virtualDisplayController.resizeTarget(
+                            to: CGSize(width: parts[0], height: parts[1]),
+                            reason: "env test"
+                        ) { size in
+                            AppLogger.shared.log("PEEKPORTAL_TEST_RESIZE requested=\(spec) result=\(size)")
+                        }
+                    }
+                }
             }
         } catch {
             AppLogger.shared.log("virtual display failed error=\(error.localizedDescription)")
