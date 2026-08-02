@@ -3,6 +3,12 @@ import CoreImage
 import CoreMedia
 @preconcurrency import ScreenCaptureKit
 
+/// What the portal is currently showing, for the menu bar UI.
+struct ShareSourceInfo {
+    let title: String
+    let icon: NSImage?
+}
+
 @MainActor
 final class CaptureController: NSObject {
     typealias ResizeTargetHandler = (_ requestedSize: CGSize, _ reason: String, _ completion: @escaping (CGSize) -> Void) -> Void
@@ -15,6 +21,7 @@ final class CaptureController: NSObject {
     private let resizeTarget: ResizeTargetHandler
     private let outputQueue = DispatchQueue(label: "\(AppMetadata.bundleIdentifier).screen-output", qos: .userInteractive)
     private let statusHandler: (String) -> Void
+    private let sourceHandler: (ShareSourceInfo?) -> Void
 
     /// Whether the shared frame should include the pointer. Window shares
     /// only draw it while the pointer is actually inside the shared window;
@@ -32,6 +39,7 @@ final class CaptureController: NSObject {
     private var cursorTimer: Timer?
     private var captureRequestID = 0
     private var activeWindowID: CGWindowID?
+    private var activeDisplayID: CGDirectDisplayID?
 
     init(
         renderer: CaptureRendererView,
@@ -39,7 +47,8 @@ final class CaptureController: NSObject {
         excludedDisplayIDs: Set<CGDirectDisplayID>,
         pixelScale: CGFloat,
         resizeTarget: @escaping ResizeTargetHandler,
-        statusHandler: @escaping (String) -> Void
+        statusHandler: @escaping (String) -> Void,
+        sourceHandler: @escaping (ShareSourceInfo?) -> Void
     ) {
         self.renderer = renderer
         self.initialOutputSize = outputSize
@@ -47,6 +56,7 @@ final class CaptureController: NSObject {
         self.pixelScale = pixelScale
         self.resizeTarget = resizeTarget
         self.statusHandler = statusHandler
+        self.sourceHandler = sourceHandler
         super.init()
         AppLogger.shared.log("CaptureController init outputSize=\(outputSize) pixelScale=\(pixelScale) excludedDisplayIDs=\(Array(excludedDisplayIDs))")
     }
@@ -70,11 +80,17 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("shareFocusedWindow filter created")
 
                 await MainActor.run {
+                    guard self.resolveShareGate(for: target) else { return }
                     self.activeWindowID = target.window.windowID
+                    self.activeDisplayID = nil
                     self.startCapture(
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
+                        sourceInfo: ShareSourceInfo(
+                            title: target.description,
+                            icon: Self.appIcon(for: target.window.owningApplication?.processID)
+                        ),
                         cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
@@ -105,10 +121,12 @@ final class CaptureController: NSObject {
 
                 await MainActor.run {
                     self.activeWindowID = nil
+                    self.activeDisplayID = target.display.displayID
                     self.startCapture(
                         filter: self.makeMonitorFilter(for: target),
                         sourceName: target.description,
                         sourceSize: target.captureSize,
+                        sourceInfo: ShareSourceInfo(title: target.description, icon: Self.displaySymbolIcon()),
                         cursorPolicy: .always
                     )
                 }
@@ -138,11 +156,17 @@ final class CaptureController: NSObject {
                 let filter = SCContentFilter(desktopIndependentWindow: target.window)
 
                 await MainActor.run {
+                    guard self.resolveShareGate(for: target) else { return }
                     self.activeWindowID = target.window.windowID
+                    self.activeDisplayID = nil
                     self.startCapture(
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
+                        sourceInfo: ShareSourceInfo(
+                            title: target.description,
+                            icon: Self.appIcon(for: target.window.owningApplication?.processID)
+                        ),
                         cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
@@ -171,10 +195,12 @@ final class CaptureController: NSObject {
 
                 await MainActor.run {
                     self.activeWindowID = nil
+                    self.activeDisplayID = target.display.displayID
                     self.startCapture(
                         filter: self.makeMonitorFilter(for: target),
                         sourceName: target.description,
                         sourceSize: target.captureSize,
+                        sourceInfo: ShareSourceInfo(title: target.description, icon: Self.displaySymbolIcon()),
                         cursorPolicy: .always
                     )
                 }
@@ -199,13 +225,22 @@ final class CaptureController: NSObject {
                 let target = try await resolver.focusedWindow()
                 await MainActor.run {
                     guard target.window.windowID != self.activeWindowID else { return }
+                    guard PortalPreferences.gate(forAppBundleID: target.window.owningApplication?.bundleIdentifier) == .allowed else {
+                        AppLogger.shared.log("followFocusRefresh skipped gated app bundleID=\(target.window.owningApplication?.bundleIdentifier ?? "?")")
+                        return
+                    }
                     AppLogger.shared.log("followFocusRefresh retarget windowID=\(target.window.windowID) title=\(target.window.title ?? "")")
                     let filter = SCContentFilter(desktopIndependentWindow: target.window)
                     self.activeWindowID = target.window.windowID
+                    self.activeDisplayID = nil
                     self.startCapture(
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
+                        sourceInfo: ShareSourceInfo(
+                            title: target.description,
+                            icon: Self.appIcon(for: target.window.owningApplication?.processID)
+                        ),
                         cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
@@ -235,8 +270,10 @@ final class CaptureController: NSObject {
         AppLogger.shared.log("clear")
         captureRequestID += 1
         activeWindowID = nil
+        activeDisplayID = nil
         stopCurrentStream()
         renderer.clear()
+        sourceHandler(nil)
         statusHandler("Clear")
     }
 
@@ -244,9 +281,74 @@ final class CaptureController: NSObject {
         AppLogger.shared.log("showTestPattern initialOutputSize=\(initialOutputSize)")
         captureRequestID += 1
         activeWindowID = nil
+        activeDisplayID = nil
         stopCurrentStream()
         renderer.showTestPattern()
+        sourceHandler(ShareSourceInfo(title: "Test Target", icon: nil))
         statusHandler("Showing test target")
+    }
+
+    /// Restarts an active monitor capture so filter changes (block/allow
+    /// lists, notification hiding) take effect immediately.
+    func refreshMonitorFilterIfSharing() {
+        guard let displayID = activeDisplayID else { return }
+        AppLogger.shared.log("refreshMonitorFilterIfSharing displayID=\(displayID)")
+        shareDisplay(withID: displayID)
+    }
+
+    /// Returns true when the share may proceed, resolving block/allow-list
+    /// conflicts with the user. Used by explicit window shares only; follow
+    /// focus silently skips gated apps instead of prompting.
+    private func resolveShareGate(for target: WindowTarget) -> Bool {
+        let bundleID = target.window.owningApplication?.bundleIdentifier
+        let appName = target.window.owningApplication?.applicationName ?? "This app"
+
+        switch PortalPreferences.gate(forAppBundleID: bundleID) {
+        case .allowed:
+            return true
+
+        case .blockedByBlockList:
+            guard let bundleID else { return true }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "\(appName) is on your block list"
+            alert.informativeText = "Blocked apps never appear in the shared frame. Remove \(appName) from the block list and share this window?"
+            alert.addButton(withTitle: "Remove & Share")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                statusHandler("Share canceled — \(appName) is blocked")
+                return false
+            }
+            AppLogger.shared.log("share gate removed from block list bundleID=\(bundleID)")
+            PortalPreferences.removeBlockedBundleID(bundleID)
+            return true
+
+        case .notInAllowList:
+            guard let bundleID else { return true }
+            if PortalPreferences.autoAddToAllowList {
+                AppLogger.shared.log("share gate auto-added to allow list bundleID=\(bundleID)")
+                PortalPreferences.addAllowedBundleID(bundleID)
+                return true
+            }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "\(appName) isn't on your allow list"
+            alert.informativeText = "You're blocking everything except allowed apps. Add \(appName) to the allow list and share this window?"
+            alert.addButton(withTitle: "Add & Share")
+            alert.addButton(withTitle: "Cancel")
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Always add apps I share to the allow list"
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                statusHandler("Share canceled — \(appName) isn't allowed")
+                return false
+            }
+            AppLogger.shared.log("share gate added to allow list bundleID=\(bundleID) autoAdd=\(alert.suppressionButton?.state == .on)")
+            PortalPreferences.addAllowedBundleID(bundleID)
+            if alert.suppressionButton?.state == .on {
+                PortalPreferences.autoAddToAllowList = true
+            }
+            return true
+        }
     }
 
     /// Builds the monitor share filter from user preferences: the app itself
@@ -264,7 +366,7 @@ final class CaptureController: NSObject {
         }
 
         let ownProcessID = ProcessInfo.processInfo.processIdentifier
-        let blocked = mode == .blockList ? Set(PortalPreferences.blockedBundleIDs) : []
+        let blocked = Set(PortalPreferences.blockedBundleIDs)
         let excluded = target.applications.filter { app in
             app.processID == ownProcessID
                 || (hideNotifications && app.bundleIdentifier == "com.apple.notificationcenterui")
@@ -277,6 +379,7 @@ final class CaptureController: NSObject {
         filter: SCContentFilter,
         sourceName: String,
         sourceSize: CGSize,
+        sourceInfo: ShareSourceInfo,
         cursorPolicy: CursorPolicy
     ) {
         AppLogger.shared.log("startCapture source=\(sourceName) sourceSize=\(sourceSize)")
@@ -297,6 +400,7 @@ final class CaptureController: NSObject {
                     sourceName: sourceName,
                     sourceSize: sourceSize,
                     outputSize: outputSize,
+                    sourceInfo: sourceInfo,
                     cursorPolicy: cursorPolicy
                 )
             }
@@ -309,6 +413,7 @@ final class CaptureController: NSObject {
         sourceName: String,
         sourceSize: CGSize,
         outputSize: CGSize,
+        sourceInfo: ShareSourceInfo,
         cursorPolicy: CursorPolicy
     ) {
         guard requestID == captureRequestID else {
@@ -339,6 +444,7 @@ final class CaptureController: NSObject {
         }
         AppLogger.shared.log("stream configuration width=\(configuration.width) height=\(configuration.height) queueDepth=\(configuration.queueDepth)")
 
+        renderer.beginFrames()
         let output = StreamOutput(renderer: renderer)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         AppLogger.shared.log("SCStream created")
@@ -373,6 +479,7 @@ final class CaptureController: NSObject {
                 } else {
                     AppLogger.shared.log("SCStream startCapture success source=\(sourceName)")
                     self.statusHandler("Sharing \(sourceName)")
+                    self.sourceHandler(sourceInfo)
                     self.startCursorTimerIfNeeded()
                 }
             }
@@ -428,6 +535,21 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("cursor updateConfiguration failed error=\(error.localizedDescription)")
             }
         }
+    }
+
+    private static func appIcon(for processID: pid_t?) -> NSImage? {
+        guard let processID,
+              let icon = NSRunningApplication(processIdentifier: processID)?.icon?.copy() as? NSImage else {
+            return nil
+        }
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+
+    private static func displaySymbolIcon() -> NSImage? {
+        let image = NSImage(systemSymbolName: "display", accessibilityDescription: "Display")
+        image?.isTemplate = true
+        return image
     }
 
     private static func streamSize(for sourceSize: CGSize, fitting outputSize: CGSize) -> CGSize {

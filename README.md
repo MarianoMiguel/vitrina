@@ -75,6 +75,17 @@ deactivated and joins all spaces; stronger Stage Manager flags are avoided
 because they can make the target disappear from some meeting apps' share
 pickers.
 
+## Developer mode
+
+Test target, diagnostics, virtual display info, and log-path UI are hidden
+from end users. Enable them with:
+
+```sh
+defaults write computer.interstellar.peekportal developerMode -bool true
+```
+
+and relaunch the app.
+
 ## Development gotcha: launch with `open`, never the raw binary
 
 Always launch the app with `open dist/PeekPortal.app` (or Finder). Launching

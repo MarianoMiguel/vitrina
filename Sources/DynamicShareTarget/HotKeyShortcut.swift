@@ -44,6 +44,59 @@ struct HotKeyShortcut: Equatable {
         self.modifiers = modifiers
     }
 
+    /// Representation for NSMenuItem.keyEquivalent so shortcuts render with
+    /// native right-aligned glyphs (⌃⌥W) like Settings and Quit do.
+    var menuKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)? {
+        guard let key = Self.keyEquivalents[keyCode] else { return nil }
+
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers & UInt32(controlKey) != 0 { flags.insert(.control) }
+        if modifiers & UInt32(optionKey) != 0 { flags.insert(.option) }
+        if modifiers & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+        if modifiers & UInt32(cmdKey) != 0 { flags.insert(.command) }
+        return (key, flags)
+    }
+
+    private static let keyEquivalents: [UInt32: String] = {
+        func functionKey(_ value: Int) -> String {
+            UnicodeScalar(value).map(String.init) ?? ""
+        }
+
+        var map: [UInt32: String] = [:]
+        for (code, name) in keyNames {
+            if name.count == 1 {
+                map[code] = name.lowercased()
+            }
+        }
+        map[UInt32(kVK_Space)] = " "
+        map[UInt32(kVK_Return)] = "\r"
+        map[UInt32(kVK_Tab)] = "\t"
+        map[UInt32(kVK_Escape)] = "\u{001B}"
+        map[UInt32(kVK_Delete)] = "\u{0008}"
+        map[UInt32(kVK_ForwardDelete)] = functionKey(NSDeleteFunctionKey)
+        map[UInt32(kVK_Home)] = functionKey(NSHomeFunctionKey)
+        map[UInt32(kVK_End)] = functionKey(NSEndFunctionKey)
+        map[UInt32(kVK_PageUp)] = functionKey(NSPageUpFunctionKey)
+        map[UInt32(kVK_PageDown)] = functionKey(NSPageDownFunctionKey)
+        map[UInt32(kVK_LeftArrow)] = functionKey(NSLeftArrowFunctionKey)
+        map[UInt32(kVK_RightArrow)] = functionKey(NSRightArrowFunctionKey)
+        map[UInt32(kVK_UpArrow)] = functionKey(NSUpArrowFunctionKey)
+        map[UInt32(kVK_DownArrow)] = functionKey(NSDownArrowFunctionKey)
+        let fKeys: [(Int, Int)] = [
+            (kVK_F1, NSF1FunctionKey), (kVK_F2, NSF2FunctionKey), (kVK_F3, NSF3FunctionKey),
+            (kVK_F4, NSF4FunctionKey), (kVK_F5, NSF5FunctionKey), (kVK_F6, NSF6FunctionKey),
+            (kVK_F7, NSF7FunctionKey), (kVK_F8, NSF8FunctionKey), (kVK_F9, NSF9FunctionKey),
+            (kVK_F10, NSF10FunctionKey), (kVK_F11, NSF11FunctionKey), (kVK_F12, NSF12FunctionKey),
+            (kVK_F13, NSF13FunctionKey), (kVK_F14, NSF14FunctionKey), (kVK_F15, NSF15FunctionKey),
+            (kVK_F16, NSF16FunctionKey), (kVK_F17, NSF17FunctionKey), (kVK_F18, NSF18FunctionKey),
+            (kVK_F19, NSF19FunctionKey), (kVK_F20, NSF20FunctionKey)
+        ]
+        for (code, value) in fKeys {
+            map[UInt32(code)] = functionKey(value)
+        }
+        return map
+    }()
+
     private static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         var modifiers: UInt32 = 0
 

@@ -13,11 +13,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case testTarget = "Test Target"
     }
 
+    private enum StatusKind {
+        case neutral, sharing, problem
+
+        var word: String {
+            switch self {
+            case .neutral: "Ready"
+            case .sharing: "Sharing"
+            case .problem: "Problem"
+            }
+        }
+
+        var color: NSColor {
+            switch self {
+            case .neutral: .systemGray
+            case .sharing: .systemGreen
+            case .problem: .systemRed
+            }
+        }
+    }
+
     private let appName = AppMetadata.productName
     private var statusItem: NSStatusItem?
     private var statusMenuItem: NSMenuItem?
-    private var targetMenuItem: NSMenuItem?
+    private var sourceMenuItem: NSMenuItem?
     private var stageManagerMenuItem: NSMenuItem?
+    private var currentSource: ShareSourceInfo?
     private var focusedWindowMenuItem: NSMenuItem?
     private var focusedMonitorMenuItem: NSMenuItem?
     private var followFocusMenuItem: NSMenuItem?
@@ -71,6 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     },
                     statusHandler: { [weak self] status in
                         Task { @MainActor in self?.updateStatus(status) }
+                    },
+                    sourceHandler: { [weak self] source in
+                        Task { @MainActor in
+                            self?.currentSource = source
+                            self?.refreshStatusMenu()
+                        }
                     }
                 )
                 self.configureHotKeys()
@@ -151,13 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.delegate = self
 
-        let statusMenuItem = NSMenuItem(title: "Status: Starting", action: nil, keyEquivalent: "")
+        let statusMenuItem = NSMenuItem(title: "Starting", action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
 
-        let targetMenuItem = NSMenuItem(title: "Target: Idle", action: nil, keyEquivalent: "")
-        targetMenuItem.isEnabled = false
-        menu.addItem(targetMenuItem)
+        let sourceMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        sourceMenuItem.isEnabled = false
+        sourceMenuItem.isHidden = true
+        sourceMenuItem.indentationLevel = 1
+        menu.addItem(sourceMenuItem)
 
         let stageManagerMenuItem = NSMenuItem(
             title: "Stage Manager is on — window shares follow focus",
@@ -169,53 +198,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(stageManagerMenuItem)
         menu.addItem(.separator())
 
-        let focusedWindowMenuItem = NSMenuItem(title: "", action: #selector(shareFocusedWindow), keyEquivalent: "")
+        let focusedWindowMenuItem = NSMenuItem(title: "Share Focused Window", action: #selector(shareFocusedWindow), keyEquivalent: "")
         focusedWindowMenuItem.target = self
+        focusedWindowMenuItem.image = Self.symbolImage("macwindow")
         menu.addItem(focusedWindowMenuItem)
 
-        let focusedMonitorMenuItem = NSMenuItem(title: "", action: #selector(shareFocusedMonitor), keyEquivalent: "")
+        let focusedMonitorMenuItem = NSMenuItem(title: "Share Focused Monitor", action: #selector(shareFocusedMonitor), keyEquivalent: "")
         focusedMonitorMenuItem.target = self
+        focusedMonitorMenuItem.image = Self.symbolImage("display")
         menu.addItem(focusedMonitorMenuItem)
 
-        let followFocusMenuItem = NSMenuItem(title: "", action: #selector(toggleFollowFocus), keyEquivalent: "")
+        let followFocusMenuItem = NSMenuItem(title: "Follow Focus", action: #selector(toggleFollowFocus), keyEquivalent: "")
         followFocusMenuItem.target = self
+        followFocusMenuItem.image = Self.symbolImage("scope")
         menu.addItem(followFocusMenuItem)
         menu.addItem(.separator())
 
         let shareWindowItem = NSMenuItem(title: "Share Window", action: nil, keyEquivalent: "")
         shareWindowItem.submenu = shareWindowSubmenu
+        shareWindowItem.image = Self.symbolImage("macwindow.on.rectangle")
         menu.addItem(shareWindowItem)
 
         let shareMonitorItem = NSMenuItem(title: "Share Monitor", action: nil, keyEquivalent: "")
         shareMonitorItem.submenu = shareMonitorSubmenu
+        shareMonitorItem.image = Self.symbolImage("display.2")
         menu.addItem(shareMonitorItem)
         menu.addItem(.separator())
 
-        let clearMenuItem = NSMenuItem(title: "", action: #selector(clearTarget), keyEquivalent: "")
+        let clearMenuItem = NSMenuItem(title: "Clear", action: #selector(clearTarget), keyEquivalent: "")
         clearMenuItem.target = self
+        clearMenuItem.image = Self.symbolImage("xmark.circle")
         menu.addItem(clearMenuItem)
 
-        let testItem = NSMenuItem(title: "Show Test Target", action: #selector(showTestTarget), keyEquivalent: "")
-        testItem.target = self
-        menu.addItem(testItem)
+        if PortalPreferences.developerModeEnabled {
+            let testItem = NSMenuItem(title: "Show Test Target", action: #selector(showTestTarget), keyEquivalent: "")
+            testItem.target = self
+            testItem.image = Self.symbolImage("checkerboard.rectangle")
+            menu.addItem(testItem)
 
-        let settingsItem = NSMenuItem(title: "Settings", action: #selector(openSettings), keyEquivalent: ",")
+            let diagnosticsItem = NSMenuItem(title: "Copy Diagnostics", action: #selector(copyDiagnostics), keyEquivalent: "")
+            diagnosticsItem.target = self
+            diagnosticsItem.image = Self.symbolImage("doc.on.clipboard")
+            menu.addItem(diagnosticsItem)
+        }
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
+        settingsItem.image = Self.symbolImage("gearshape")
         menu.addItem(settingsItem)
-
-        let diagnosticsItem = NSMenuItem(title: "Copy Diagnostics", action: #selector(copyDiagnostics), keyEquivalent: "")
-        diagnosticsItem.target = self
-        menu.addItem(diagnosticsItem)
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit \(appName)", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         item.menu = menu
         self.statusItem = item
         self.statusMenuItem = statusMenuItem
-        self.targetMenuItem = targetMenuItem
+        self.sourceMenuItem = sourceMenuItem
         self.stageManagerMenuItem = stageManagerMenuItem
         self.focusedWindowMenuItem = focusedWindowMenuItem
         self.focusedMonitorMenuItem = focusedMonitorMenuItem
@@ -404,6 +444,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 portalBackgroundChanged: { [weak self] in
                     self?.captureController?.refreshIdleBackground()
+                },
+                monitorFilterChanged: { [weak self] in
+                    self?.captureController?.refreshMonitorFilterIfSharing()
                 }
             )
         }
@@ -501,15 +544,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusMenu() {
-        statusMenuItem?.title = "Status: \(currentStatus)"
-        targetMenuItem?.title = "Target: \(currentMode.rawValue)"
-        focusedWindowMenuItem?.title = menuTitle(for: .focusedWindow, prefix: "Share")
-        focusedMonitorMenuItem?.title = menuTitle(for: .focusedMonitor, prefix: "Share")
-        followFocusMenuItem?.title = menuTitle(for: .followFocus, prefix: nil)
+        let kind = statusKind(for: currentStatus)
+        statusMenuItem?.title = kind.word
+        statusMenuItem?.image = Self.dotImage(color: kind.color)
+
+        if let source = currentSource {
+            sourceMenuItem?.isHidden = false
+            sourceMenuItem?.title = Self.truncatedMenuTitle(source.title, limit: 40)
+            sourceMenuItem?.image = source.icon
+        } else {
+            sourceMenuItem?.isHidden = true
+        }
+
+        applyShortcut(.focusedWindow, to: focusedWindowMenuItem)
+        applyShortcut(.focusedMonitor, to: focusedMonitorMenuItem)
+        applyShortcut(.followFocus, to: followFocusMenuItem)
+        applyShortcut(.clear, to: clearMenuItem)
         followFocusMenuItem?.state = currentMode == .followFocus ? .on : .off
-        clearMenuItem?.title = menuTitle(for: .clear, prefix: nil)
-        statusItem?.button?.toolTip = "\(currentMode.rawValue) - \(currentStatus)"
+        statusItem?.button?.toolTip = "\(appName) — \(kind.word): \(currentStatus)"
         settingsWindowController?.refresh()
+    }
+
+    private func applyShortcut(_ action: HotKeyAction, to item: NSMenuItem?) {
+        guard let item else { return }
+        if let combo = HotKeyPreferences.shortcut(for: action).menuKeyEquivalent {
+            item.keyEquivalent = combo.key
+            item.keyEquivalentModifierMask = combo.modifiers
+        } else {
+            item.keyEquivalent = ""
+        }
+    }
+
+    private func statusKind(for status: String) -> StatusKind {
+        let lower = status.lowercased()
+        if lower.hasPrefix("sharing") { return .sharing }
+        let problemMarkers = [
+            "failed", "required", "unavailable", "missing", "stopped",
+            "inactive", "denied", "hidden", "canceled", "blocked"
+        ]
+        if problemMarkers.contains(where: lower.contains) { return .problem }
+        return .neutral
+    }
+
+    private static func dotImage(color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    private static func symbolImage(_ name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        image?.isTemplate = true
+        return image
     }
 
     private func refreshStageManagerNote() {
@@ -595,11 +685,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static let maximumWindowMenuItems = 30
-
-    private func menuTitle(for action: HotKeyAction, prefix: String?) -> String {
-        let title = prefix.map { "\($0) \(action.title)" } ?? action.title
-        return "\(title)    \(HotKeyPreferences.shortcut(for: action).displayString)"
-    }
 
     private func makeDiagnosticsBundle() -> String {
         let shortcuts = HotKeyAction.allCases

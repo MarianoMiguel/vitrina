@@ -47,6 +47,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let suspendShortcuts: () -> Void
     private let resumeShortcuts: () -> Void
     private let portalBackgroundChanged: () -> Void
+    private let monitorFilterChanged: () -> Void
     private let tabStack = NSStackView()
     private let contentScrollView = NSScrollView()
     private let contentContainer = NSView()
@@ -57,6 +58,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var filterModePopUp: NSPopUpButton?
     private var removeBlockedPopUp: NSPopUpButton?
     private var removeAllowedPopUp: NSPopUpButton?
+    private var autoAddButton: NSButton?
+    private var blockListRowViews: [NSView] = []
+    private var allowListRowViews: [NSView] = []
     private let permissionsValue = NSTextField(labelWithString: "")
     private let statusValue = NSTextField(labelWithString: "")
     private let targetValue = NSTextField(labelWithString: "")
@@ -89,7 +93,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         resetAllShortcuts: @escaping () -> Bool,
         suspendShortcuts: @escaping () -> Void,
         resumeShortcuts: @escaping () -> Void,
-        portalBackgroundChanged: @escaping () -> Void
+        portalBackgroundChanged: @escaping () -> Void,
+        monitorFilterChanged: @escaping () -> Void
     ) {
         AppLogger.shared.log("settings init begin")
         self.requestPermissions = requestPermissions
@@ -110,6 +115,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.suspendShortcuts = suspendShortcuts
         self.resumeShortcuts = resumeShortcuts
         self.portalBackgroundChanged = portalBackgroundChanged
+        self.monitorFilterChanged = monitorFilterChanged
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
@@ -160,7 +166,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         targetValue.stringValue = currentTarget()
         displayValue.stringValue = targetDisplayID().map(String.init) ?? "Unavailable"
         launchAtLoginButton?.state = LoginItemController.isEnabled ? .on : .off
-        launchAtLoginButton?.title = "Launch at Login: \(launchAtLoginStatus())"
+        launchAtLoginButton?.title = launchAtLoginStatus() == "Needs Approval"
+            ? "Launch at Login (needs approval in System Settings)"
+            : "Launch at Login"
         backgroundValue.stringValue = PortalPreferences.customBackgroundURL?.lastPathComponent ?? "System wallpaper"
         hideNotificationsButton?.state = PortalPreferences.hideNotificationsWhileSharing ? .on : .off
         if let filterModePopUp {
@@ -173,6 +181,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         allowListValue.stringValue = Self.listSummary(PortalPreferences.allowedBundleIDs)
         rebuildRemovePopUp(removeBlockedPopUp, ids: PortalPreferences.blockedBundleIDs, action: #selector(removeBlockedItem(_:)))
         rebuildRemovePopUp(removeAllowedPopUp, ids: PortalPreferences.allowedBundleIDs, action: #selector(removeAllowedItem(_:)))
+        autoAddButton?.state = PortalPreferences.autoAddToAllowList ? .on : .off
+        let mode = PortalPreferences.monitorFilterMode
+        blockListRowViews.forEach { $0.isHidden = mode != .blockList }
+        allowListRowViews.forEach { $0.isHidden = mode != .allowList }
         for action in HotKeyAction.allCases where action != recordingAction {
             shortcutButtons[action]?.title = HotKeyPreferences.shortcut(for: action).displayString
         }
@@ -292,45 +304,44 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 22
+        stack.spacing = 28
+
+        let devMode = PortalPreferences.developerModeEnabled
 
         let launchButton = NSButton(
-            checkboxWithTitle: "Launch at Login: \(launchAtLoginStatus())",
+            checkboxWithTitle: "Launch at Login",
             target: self,
             action: #selector(launchAtLoginClicked(_:))
         )
         launchButton.state = LoginItemController.isEnabled ? .on : .off
         launchAtLoginButton = launchButton
 
-        stack.addArrangedSubview(SettingsSectionView(
-            title: "Status",
-            rows: [
-                SettingsRowView(label: "Current Target", valueView: targetValue),
-                SettingsRowView(label: "Status", valueView: statusValue),
+        statusValue.lineBreakMode = .byTruncatingTail
+        statusValue.widthAnchor.constraint(lessThanOrEqualToConstant: 440).isActive = true
+
+        var statusRows: [NSView] = [
+            SettingsRowView(label: "Current Target", valueView: targetValue),
+            SettingsRowView(label: "Status", valueView: statusValue)
+        ]
+        if devMode {
+            statusRows += [
                 SettingsRowView(label: "Virtual Display", valueView: displayValue),
-                SettingsButtonRowView(
-                    buttons: [
-                        SettingsButton(title: "Show Test Target", target: self, action: #selector(showTestTargetClicked))
-                    ]
-                ),
-                SettingsButtonRowView(
-                    buttons: [
-                        SettingsButton(title: "Copy Diagnostics", target: self, action: #selector(copyDiagnosticsClicked))
-                    ]
-                )
+                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                    SettingsButton(title: "Show Test Target", target: self, action: #selector(showTestTargetClicked)),
+                    SettingsButton(title: "Copy Diagnostics", target: self, action: #selector(copyDiagnosticsClicked))
+                ]))
             ]
-        ))
+        }
+        stack.addArrangedSubview(SettingsSectionView(title: "Status", rows: statusRows, showsSeparator: false))
 
         stack.addArrangedSubview(SettingsSectionView(
             title: "Portal",
             rows: [
                 SettingsRowView(label: "Background", valueView: backgroundValue),
-                SettingsButtonRowView(
-                    buttons: [
-                        SettingsButton(title: "Choose Image…", target: self, action: #selector(chooseBackgroundClicked)),
-                        SettingsButton(title: "Use Wallpaper", target: self, action: #selector(useWallpaperClicked))
-                    ]
-                )
+                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                    SettingsButton(title: "Choose Image…", target: self, action: #selector(chooseBackgroundClicked)),
+                    SettingsButton(title: "Use Wallpaper", target: self, action: #selector(useWallpaperClicked))
+                ]))
             ]
         ))
 
@@ -353,45 +364,54 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let removeAllowed = NSPopUpButton(frame: .zero, pullsDown: true)
         removeAllowedPopUp = removeAllowed
 
+        let autoAdd = NSButton(
+            checkboxWithTitle: "Automatically allow apps I share",
+            target: self,
+            action: #selector(autoAddToAllowListClicked(_:))
+        )
+        autoAddButton = autoAdd
+
         blockListValue.preferredMaxLayoutWidth = 420
         allowListValue.preferredMaxLayoutWidth = 420
 
-        stack.addArrangedSubview(SettingsSectionView(
-            title: "Monitor Sharing",
-            rows: [
-                SettingsRowView(label: "Notifications", valueView: hideNotifications),
-                SettingsRowView(label: "App Filter", valueView: filterPopUp),
-                SettingsRowView(label: "Block List", valueView: blockListValue),
-                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
-                    SettingsButton(title: "Add to Block List…", target: self, action: #selector(addBlockedClicked)),
-                    removeBlocked
-                ])),
-                SettingsRowView(label: "Allow List", valueView: allowListValue),
-                SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
-                    SettingsButton(title: "Add to Allow List…", target: self, action: #selector(addAllowedClicked)),
-                    removeAllowed
-                ]))
-            ]
-        ))
+        blockListRowViews = [
+            SettingsRowView(label: "Block List", valueView: blockListValue),
+            SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                SettingsButton(title: "Add App…", target: self, action: #selector(addBlockedClicked)),
+                removeBlocked
+            ]))
+        ]
+        allowListRowViews = [
+            SettingsRowView(label: "Allow List", valueView: allowListValue),
+            SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                SettingsButton(title: "Add App…", target: self, action: #selector(addAllowedClicked)),
+                removeAllowed
+            ])),
+            SettingsRowView(label: "", valueView: autoAdd)
+        ]
 
         stack.addArrangedSubview(SettingsSectionView(
-            title: "Permissions",
+            title: "Sharing Filters",
             rows: [
-                SettingsRowView(label: "Status", valueView: permissionsValue),
-                SettingsButtonRowView(
-                    buttons: [
-                        SettingsButton(title: "Request Permissions", target: self, action: #selector(requestPermissionsClicked)),
-                        SettingsButton(title: "Copy Log Path", target: self, action: #selector(copyLogPathClicked))
-                    ]
-                ),
-                SettingsButtonRowView(
-                    buttons: [
-                        SettingsButton(title: "Open Accessibility", target: self, action: #selector(openAccessibilityClicked)),
-                        SettingsButton(title: "Open Screen Recording", target: self, action: #selector(openScreenRecordingClicked))
-                    ]
-                )
-            ]
+                SettingsRowView(label: "Notifications", valueView: hideNotifications),
+                SettingsRowView(label: "Mode", valueView: filterPopUp)
+            ] + blockListRowViews + allowListRowViews
         ))
+
+        var permissionRows: [NSView] = [
+            SettingsRowView(label: "Status", valueView: permissionsValue),
+            SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                SettingsButton(title: "Request Permissions", target: self, action: #selector(requestPermissionsClicked)),
+                SettingsButton(title: "Open Accessibility", target: self, action: #selector(openAccessibilityClicked)),
+                SettingsButton(title: "Open Screen Recording", target: self, action: #selector(openScreenRecordingClicked))
+            ]))
+        ]
+        if devMode {
+            permissionRows.append(SettingsRowView(label: "", valueView: SettingsButtonRowView(buttons: [
+                SettingsButton(title: "Copy Log Path", target: self, action: #selector(copyLogPathClicked))
+            ])))
+        }
+        stack.addArrangedSubview(SettingsSectionView(title: "Permissions", rows: permissionRows))
 
         stack.addArrangedSubview(SettingsSectionView(
             title: "Shortcuts",
@@ -419,6 +439,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc private func hideNotificationsClicked(_ sender: NSButton) {
         PortalPreferences.hideNotificationsWhileSharing = sender.state == .on
         AppLogger.shared.log("hideNotificationsWhileSharing=\(sender.state == .on)")
+        monitorFilterChanged()
     }
 
     @objc private func filterModeChanged(_ sender: NSPopUpButton) {
@@ -426,28 +447,38 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard index >= 0, index < MonitorFilterMode.allCases.count else { return }
         PortalPreferences.monitorFilterMode = MonitorFilterMode.allCases[index]
         AppLogger.shared.log("monitorFilterMode=\(PortalPreferences.monitorFilterMode.rawValue)")
+        monitorFilterChanged()
         refresh()
+    }
+
+    @objc private func autoAddToAllowListClicked(_ sender: NSButton) {
+        PortalPreferences.autoAddToAllowList = sender.state == .on
+        AppLogger.shared.log("autoAddToAllowList=\(sender.state == .on)")
     }
 
     @objc private func addBlockedClicked() {
         pickApplications { PortalPreferences.addBlockedBundleID($0) }
+        monitorFilterChanged()
         refresh()
     }
 
     @objc private func addAllowedClicked() {
         pickApplications { PortalPreferences.addAllowedBundleID($0) }
+        monitorFilterChanged()
         refresh()
     }
 
     @objc private func removeBlockedItem(_ sender: NSMenuItem) {
         guard let bundleID = sender.representedObject as? String else { return }
         PortalPreferences.removeBlockedBundleID(bundleID)
+        monitorFilterChanged()
         refresh()
     }
 
     @objc private func removeAllowedItem(_ sender: NSMenuItem) {
         guard let bundleID = sender.representedObject as? String else { return }
         PortalPreferences.removeAllowedBundleID(bundleID)
+        monitorFilterChanged()
         refresh()
     }
 
@@ -783,11 +814,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 }
 
 private final class SettingsSectionView: NSStackView {
-    init(title: String, rows: [NSView]) {
+    init(title: String, rows: [NSView], showsSeparator: Bool = true) {
         super.init(frame: .zero)
         orientation = .vertical
         alignment = .leading
         spacing = 12
+
+        if showsSeparator {
+            let separator = NSBox()
+            separator.boxType = .separator
+            separator.translatesAutoresizingMaskIntoConstraints = false
+            addArrangedSubview(separator)
+            separator.widthAnchor.constraint(equalToConstant: 580).isActive = true
+            setCustomSpacing(20, after: separator)
+        }
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)

@@ -8,6 +8,10 @@ final class CaptureRendererView: NSView {
         .workingColorSpace: CGColorSpaceCreateDeviceRGB(),
         .outputColorSpace: CGColorSpaceCreateDeviceRGB()
     ])
+    // Streams stop asynchronously, so frames can arrive after clear() has
+    // painted the background; this gate drops them. Reopened by beginFrames()
+    // when the next capture starts.
+    private var acceptsFrames = true
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -24,11 +28,30 @@ final class CaptureRendererView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        layer?.contentsScale = window?.backingScaleFactor ?? 1
+        updateContentsScale()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateContentsScale()
+    }
+
+    // The layer must render at the virtual display's 2x scale or macOS
+    // downsamples the 4K capture into a 1080p backing store and the shared
+    // frame goes soft. Logged so HiDPI can be verified from the debug log.
+    private func updateContentsScale() {
+        let scale = window?.backingScaleFactor ?? 1
+        layer?.contentsScale = scale
+        AppLogger.shared.log("renderer contentsScale=\(scale)")
     }
 
     func clear() {
+        acceptsFrames = false
         showBackground()
+    }
+
+    func beginFrames() {
+        acceptsFrames = true
     }
 
     /// Idle look for the portal: the custom background image if one is set,
@@ -64,6 +87,7 @@ final class CaptureRendererView: NSView {
     }
 
     func showTestPattern() {
+        acceptsFrames = false
         let targetSize = validDrawingSize()
         let image = NSImage(size: targetSize)
 
@@ -133,6 +157,7 @@ final class CaptureRendererView: NSView {
         let extent = image.extent
 
         Task { @MainActor in
+            guard self.acceptsFrames else { return }
             guard let cgImage = self.ciContext.createCGImage(image, from: extent) else {
                 return
             }
