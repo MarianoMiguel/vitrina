@@ -58,6 +58,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var filterModePopUp: NSPopUpButton?
     private var removeBlockedPopUp: NSPopUpButton?
     private var removeAllowedPopUp: NSPopUpButton?
+    private var hideMenuBarButton: NSButton?
     private var autoAddButton: NSButton?
     private var blockListRowViews: [NSView] = []
     private var allowListRowViews: [NSView] = []
@@ -171,6 +172,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             : "Launch at Login"
         backgroundValue.stringValue = PortalPreferences.customBackgroundURL?.lastPathComponent ?? "System wallpaper"
         hideNotificationsButton?.state = PortalPreferences.hideNotificationsWhileSharing ? .on : .off
+        hideMenuBarButton?.state = PortalPreferences.hideMenuBarWhileSharing ? .on : .off
         if let filterModePopUp {
             let index = MonitorFilterMode.allCases.firstIndex(of: PortalPreferences.monitorFilterMode) ?? 0
             if filterModePopUp.indexOfSelectedItem != index {
@@ -353,6 +355,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         hideNotifications.state = PortalPreferences.hideNotificationsWhileSharing ? .on : .off
         hideNotificationsButton = hideNotifications
 
+        let hideMenuBar = NSButton(
+            checkboxWithTitle: "Hide the menu bar while sharing",
+            target: self,
+            action: #selector(hideMenuBarClicked(_:))
+        )
+        hideMenuBar.state = PortalPreferences.hideMenuBarWhileSharing ? .on : .off
+        hideMenuBarButton = hideMenuBar
+
         let filterPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         MonitorFilterMode.allCases.forEach { filterPopUp.addItem(withTitle: $0.title) }
         filterPopUp.target = self
@@ -394,6 +404,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             title: "Sharing Filters",
             rows: [
                 SettingsRowView(label: "Notifications", valueView: hideNotifications),
+                SettingsRowView(label: "Menu Bar", valueView: hideMenuBar),
                 SettingsRowView(label: "Mode", valueView: filterPopUp)
             ] + blockListRowViews + allowListRowViews
         ))
@@ -439,6 +450,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc private func hideNotificationsClicked(_ sender: NSButton) {
         PortalPreferences.hideNotificationsWhileSharing = sender.state == .on
         AppLogger.shared.log("hideNotificationsWhileSharing=\(sender.state == .on)")
+        monitorFilterChanged()
+    }
+
+    @objc private func hideMenuBarClicked(_ sender: NSButton) {
+        PortalPreferences.hideMenuBarWhileSharing = sender.state == .on
+        AppLogger.shared.log("hideMenuBarWhileSharing=\(sender.state == .on)")
         monitorFilterChanged()
     }
 

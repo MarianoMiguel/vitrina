@@ -544,7 +544,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusMenu() {
-        let kind = statusKind(for: currentStatus)
+        // An active source is ground truth: while something is streaming the
+        // status is Sharing, regardless of stale status text from an earlier
+        // canceled or failed attempt. Failures clear the source, so the text
+        // heuristic only decides between Ready and Problem when idle.
+        let kind = currentSource != nil ? StatusKind.sharing : statusKind(for: currentStatus)
         statusMenuItem?.title = kind.word
         statusMenuItem?.image = Self.dotImage(color: kind.color)
 

@@ -359,20 +359,26 @@ final class CaptureController: NSObject {
         let hideNotifications = PortalPreferences.hideNotificationsWhileSharing
         AppLogger.shared.log("makeMonitorFilter mode=\(mode.rawValue) hideNotifications=\(hideNotifications) blocked=\(PortalPreferences.blockedBundleIDs.count) allowed=\(PortalPreferences.allowedBundleIDs.count)")
 
+        let filter: SCContentFilter
         if mode == .allowList {
             let allowed = Set(PortalPreferences.allowedBundleIDs)
             let apps = target.applications.filter { allowed.contains($0.bundleIdentifier) }
-            return SCContentFilter(display: target.display, including: apps, exceptingWindows: [])
+            filter = SCContentFilter(display: target.display, including: apps, exceptingWindows: [])
+        } else {
+            let ownProcessID = ProcessInfo.processInfo.processIdentifier
+            let blocked = Set(PortalPreferences.blockedBundleIDs)
+            let excluded = target.applications.filter { app in
+                app.processID == ownProcessID
+                    || (hideNotifications && app.bundleIdentifier == "com.apple.notificationcenterui")
+                    || blocked.contains(app.bundleIdentifier)
+            }
+            filter = SCContentFilter(display: target.display, excludingApplications: excluded, exceptingWindows: [])
         }
 
-        let ownProcessID = ProcessInfo.processInfo.processIdentifier
-        let blocked = Set(PortalPreferences.blockedBundleIDs)
-        let excluded = target.applications.filter { app in
-            app.processID == ownProcessID
-                || (hideNotifications && app.bundleIdentifier == "com.apple.notificationcenterui")
-                || blocked.contains(app.bundleIdentifier)
+        if #available(macOS 14.2, *) {
+            filter.includeMenuBar = !PortalPreferences.hideMenuBarWhileSharing
         }
-        return SCContentFilter(display: target.display, excludingApplications: excluded, exceptingWindows: [])
+        return filter
     }
 
     private func startCapture(
@@ -581,6 +587,7 @@ final class CaptureController: NSObject {
 
     private func presentPermissionFailure(_ message: String, recovery: String) {
         renderer.showBackground()
+        sourceHandler(nil)
         statusHandler("\(message) — \(recovery)")
     }
 
@@ -588,6 +595,7 @@ final class CaptureController: NSObject {
         let message = "\(prefix): \(error.localizedDescription)"
         let recovery = recoverySuggestion(for: error)
         renderer.showBackground()
+        sourceHandler(nil)
         statusHandler("\(message) \(recovery)")
     }
 
@@ -638,6 +646,7 @@ extension CaptureController: SCStreamDelegate {
                 AppLogger.shared.log("SCStream delegate ignored stale streamDidBecomeInactive")
                 return
             }
+            sourceHandler(nil)
             statusHandler("Source inactive")
         }
     }

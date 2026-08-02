@@ -46,6 +46,19 @@ enum PortalPreferences {
         }
     }
 
+    private static let hideMenuBarKey = "monitorShare.hideMenuBar"
+
+    /// Defaults to true: the menu bar leaks the focused app's name (and the
+    /// clock) even when that app is block-listed.
+    static var hideMenuBarWhileSharing: Bool {
+        get {
+            UserDefaults.standard.object(forKey: hideMenuBarKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: hideMenuBarKey)
+        }
+    }
+
     /// Defaults to true: notification banners have no place in a shared frame.
     static var hideNotificationsWhileSharing: Bool {
         get {
