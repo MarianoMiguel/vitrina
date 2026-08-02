@@ -1,39 +1,58 @@
-# Vitrina
+<h1 align="center">Vitrina</h1>
 
-**A dynamic screen sharing target for macOS.** Share one stable virtual display in Zoom, Meet, or any meeting app — then switch what appears on it instantly, from a menu bar app or with global hotkeys. Inspired by [niri](https://github.com/YaLTeR/niri)'s dynamic cast target.
+<p align="center"><b>A dynamic screen sharing target for macOS.</b></p>
 
-Instead of fumbling with your meeting app's share picker mid-call, you share the `Vitrina` display once. After that:
+<p align="center">
+<a href="https://github.com/MarianoMiguel/vitrina/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+<a href="https://github.com/MarianoMiguel/vitrina/actions/workflows/ci.yml"><img src="https://github.com/MarianoMiguel/vitrina/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/MarianoMiguel/vitrina/releases"><img src="https://img.shields.io/github/v/release/MarianoMiguel/vitrina?include_prereleases" alt="Release"></a>
+</p>
 
-- `Control+Option+W` — share the focused window
-- `Control+Option+M` — share the monitor containing the focused window
-- `Control+Option+F` — toggle Follow Focus: the share tracks whatever window is active
-- `Control+Option+C` — clear to your wallpaper (or a custom backdrop)
+<p align="center">
+<a href="#install">Install</a> · <a href="#features">Features</a> · <a href="#how-it-works">How it works</a> · <a href="docs/DEVELOPMENT.md">Development</a> · <a href="docs/RELEASING.md">Releasing</a>
+</p>
 
-All shortcuts are re-recordable in Settings. The menu bar also has explicit pickers: **Share Window** lists every shareable window (with app icons, front-to-back), **Share Monitor** lists every display by name.
+<!-- screenshot: menu bar open over a shared window, coming soon -->
 
-## Privacy features
+## About
 
-Because Vitrina composites the shared frame itself, it controls exactly what participants see:
+Share one stable virtual display in Zoom, Meet, or any meeting app — then switch what appears on it instantly, from the menu bar or with global hotkeys. No more fumbling with your meeting app's share picker mid-call, and no more "let me re-share my screen."
 
-- **Hide all notifications while sharing** (default on) — banners never reach the share.
-- **Hide the menu bar** (default on) — the focused app's name and your status icons stay private.
-- **Block list** — apps that never appear in a monitor share, even when on screen.
-- **Allow list mode** — block everything except apps you pick; sharing an unlisted window offers to add it (optionally automatically).
-- The cursor appears in window shares only while it's actually over the shared window.
+Vitrina creates a virtual display that meeting apps see as an ordinary screen. You share it once; Vitrina decides what shows up there:
 
-## Quality
+| Shortcut | Action |
+| --- | --- |
+| `⌃⌥W` | Share the focused window |
+| `⌃⌥M` | Share the monitor containing the focused window |
+| `⌃⌥F` | Follow Focus — the share tracks whatever window is active |
+| `⌃⌥C` | Clear to your wallpaper (or a custom backdrop) |
 
-The virtual display runs in HiDPI (2x) and physically resizes to match the shared source's aspect ratio, so portrait windows aren't letterboxed into 16:9 and Retina text stays crisp (up to 3840×2160 output).
+All shortcuts are re-recordable in Settings. The menu bar also has explicit pickers listing every shareable window (with app icons, front-to-back) and every display by name.
+
+The idea comes from [niri](https://github.com/niri-wm/niri)'s dynamic cast target, translated to macOS.
+
+## Features
+
+- **Instant target switching** — window, monitor, or follow-focus, without touching the meeting app.
+- **Privacy filters** — Vitrina composites the shared frame itself, so it controls exactly what participants see:
+  - Hide all notifications while sharing (default on).
+  - Hide the menu bar (default on) — the focused app's name and your status icons stay private.
+  - Block list: apps that never appear in a monitor share, even when on screen.
+  - Allow-list mode: block everything except apps you pick; sharing an unlisted window offers to add it, optionally automatically.
+- **Honest cursor** — in window shares the pointer appears only while it's actually over the shared window.
+- **HiDPI output** — the virtual display runs at 2x and physically resizes to match the source's aspect ratio, so portrait windows aren't letterboxed into 16:9 and Retina text stays crisp (up to 3840×2160).
+- **Clean idle state** — when nothing is shared, participants see your wallpaper or a custom image, never a debug screen.
+- **Stage Manager, honestly** — macOS stops delivering frames for off-stage windows, so only the active window can be shown reliably; Vitrina says so in the menu and degrades window sharing to Follow Focus instead of freezing.
 
 ## Install
 
-**Homebrew (coming soon):**
+Homebrew (available with the first tagged release):
 
 ```sh
 brew install marianomiguel/tap/vitrina
 ```
 
-**Build from source:**
+Or build from source:
 
 ```sh
 git clone https://github.com/MarianoMiguel/vitrina.git
@@ -42,39 +61,22 @@ cd vitrina
 open dist/Vitrina.app
 ```
 
-The build creates an ignored local signing identity under `.local-codesign/` so macOS Accessibility and Screen Recording permissions stay stable across rebuilds. If System Settings shows the app as enabled while it still asks for permissions, reset stale TCC entries:
-
-```sh
-./scripts/trust-local-signing-certificate.sh
-./scripts/reset-permissions.sh
-./scripts/build-app.sh
-```
-
-## Permissions
-
-- **Accessibility** — to resolve the focused window.
-- **Screen Recording** — so ScreenCaptureKit can capture the chosen source.
+macOS will ask for two permissions: **Accessibility** (to resolve the focused window) and **Screen Recording** (so ScreenCaptureKit can capture the chosen source).
 
 ## How it works
 
-Vitrina creates a virtual display through a small Objective-C shim over macOS's private `CGVirtualDisplay` API (the approach popularized by [DeskPad](https://github.com/Stengo/DeskPad)), renders ScreenCaptureKit captures onto it, and lets meeting apps treat that display as an ordinary screen. Because of the private API it is distributed outside the Mac App Store.
+Vitrina creates a virtual display through a small Objective-C shim over macOS's private `CGVirtualDisplay` API, renders ScreenCaptureKit captures onto it, and lets meeting apps treat that display as an ordinary screen. Selective visibility (block/allow lists, notification and menu bar hiding) works because ScreenCaptureKit composites frames from individual window layers rather than screenshotting the framebuffer.
 
-Stage Manager support is explicit rather than best-effort: macOS stops delivering frames for windows moved off the current stage, so only the active window can be shown reliably. When Stage Manager is on, the menu says so and window sharing degrades to Follow Focus.
+Because of the private API, Vitrina is distributed outside the Mac App Store.
 
-## Updates
+Updates ship through GitHub releases: the app checks the published appcast manually today, with a Sparkle-based auto-updater planned.
 
-The app has a manual update check against the appcast published with each GitHub release. A Sparkle-based auto-updater with signed (EdDSA) appcasts is planned before the first tagged release.
+## Acknowledgments
 
-## Development notes
-
-Verbose logs: `~/Library/Logs/Vitrina/debug.log`. Test target, diagnostics export, and related UI hide behind a flag:
-
-```sh
-defaults write computer.interstellar.vitrina developerMode -bool true
-```
-
-**Always launch with `open dist/Vitrina.app`, never the raw binary.** Launching `Contents/MacOS/vitrina` from a terminal makes macOS 26 attribute the menu bar item to the *terminal* in ControlCenter's `trackedApplications` registry (`~/Library/Group Containers/group.com.apple.controlcenter/`). If the terminal's own menu bar icon is hidden, every item attributed to it is silently blocked — the item registers but gets parked off-screen, and the app's own "Show in Menu Bar" toggle can't fix it. Vitrina detects this parked state at launch and points at System Settings > Menu Bar; repairing a poisoned attribution requires editing that registry (Full Disk Access) or unhiding the terminal's icon.
+- [niri](https://github.com/niri-wm/niri) — the scrollable-tiling Wayland compositor whose dynamic cast target inspired Vitrina.
+- [DeskPad](https://github.com/Stengo/DeskPad) (MIT) — pioneered the virtual-monitor-for-screen-sharing approach on macOS. Vitrina's `VirtualDisplayShim` adapts the private `CGVirtualDisplay` API declarations carried by DeskPad.
+- [Khaos Tian](https://github.com/KhaosT) — originally reverse-engineered the `CGVirtualDisplay` private API declarations (VirtualDisplayExp, 2021) that DeskPad and Vitrina build on.
 
 ## License
 
-[MIT](LICENSE). Vitrina is free and open source, produced by Interstellar Computer, a DBA of Mariano Miguel, LLC.
+[MIT](LICENSE). Created by [Mariano Miguel](https://github.com/MarianoMiguel).

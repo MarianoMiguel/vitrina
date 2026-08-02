@@ -291,13 +291,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             SettingsTextStack(
                 title: AppMetadata.productName,
                 body: "A small macOS utility for switching a stable screen sharing target between the focused window, focused monitor, or a cleared frame.",
-                detail: "Produced by \(AppMetadata.producerLine) | \(AppMetadata.website)"
+                detail: "Created by \(AppMetadata.creatorName) | \(AppMetadata.website)"
             )
         case .license:
             SettingsTextStack(
                 title: "License",
                 body: "Vitrina is free and open source software, released under the MIT License. Source code, issues, and contributions live at \(AppMetadata.repositoryURL.absoluteString).",
-                detail: "Produced by \(AppMetadata.producerLine)"
+                detail: "Created by \(AppMetadata.creatorName)"
             )
         }
     }

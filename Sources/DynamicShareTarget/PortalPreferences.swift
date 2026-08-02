@@ -25,7 +25,7 @@ enum PortalPreferences {
     private static let customBackgroundKey = "portal.customBackgroundPath"
 
     /// Hides test/diagnostics UI from end users. Enable with:
-    /// defaults write computer.interstellar.vitrina developerMode -bool true
+    /// defaults write com.marianomiguel.vitrina developerMode -bool true
     static var developerModeEnabled: Bool {
         UserDefaults.standard.bool(forKey: developerModeKey)
     }

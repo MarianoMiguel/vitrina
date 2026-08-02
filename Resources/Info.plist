@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>vitrina</string>
     <key>CFBundleIdentifier</key>
-    <string>computer.interstellar.vitrina</string>
+    <string>com.marianomiguel.vitrina</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -27,6 +27,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright (c) 2026 Mariano Miguel, LLC. Produced by Interstellar Computer.</string>
+    <string>Copyright (c) 2026 Mariano Miguel. MIT License.</string>
 </dict>
 </plist>

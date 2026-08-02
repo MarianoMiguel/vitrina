@@ -1,0 +1,23 @@
+# Homebrew cask for Vitrina.
+#
+# Template rendered by scripts/update-tap.sh into the tap repository
+# (MarianoMiguel/homebrew-tap, Casks/vitrina.rb) on every release; @@VERSION@@
+# and @@SHA256@@ are substituted from the released zip.
+cask "vitrina" do
+  version "@@VERSION@@"
+  sha256 "@@SHA256@@"
+
+  url "https://github.com/MarianoMiguel/vitrina/releases/download/v#{version}/Vitrina-#{version}.zip"
+  name "Vitrina"
+  desc "Dynamic screen sharing target for macOS - share one stable virtual display, switch what it shows"
+  homepage "https://github.com/MarianoMiguel/vitrina"
+
+  depends_on macos: ">= :sonoma"
+
+  app "Vitrina.app"
+
+  zap trash: [
+    "~/Library/Logs/Vitrina",
+    "~/Library/Preferences/com.marianomiguel.vitrina.plist",
+  ]
+end

@@ -1,5 +1,13 @@
 #import "VirtualDisplayShim.h"
 
+// The CGVirtualDisplay* class declarations below describe Apple's private
+// virtual display API. They are adapted (reduced to what Vitrina needs) from
+// reverse-engineered declarations originally published by Khaos Tian in
+// VirtualDisplayExp (2021) and carried by DeskPad
+// (https://github.com/Stengo/DeskPad, MIT License, Copyright (c) 2021 Paul
+// Stengel), whose approach to creating a shareable virtual monitor this shim
+// follows.
+
 @interface CGVirtualDisplayDescriptor : NSObject
 @property(nonatomic) uint32_t vendorID;
 @property(nonatomic) uint32_t productID;

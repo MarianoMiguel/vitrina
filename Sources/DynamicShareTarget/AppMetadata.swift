@@ -2,10 +2,9 @@ import Foundation
 
 enum AppMetadata {
     static let productName = "Vitrina"
-    static let companyName = "Interstellar Computer"
-    static let legalEntity = "Mariano Miguel, LLC"
-    static let website = "https://interstellar.computer"
-    static let bundleIdentifier = "computer.interstellar.vitrina"
+    static let creatorName = "Mariano Miguel"
+    static let website = "https://github.com/MarianoMiguel/vitrina"
+    static let bundleIdentifier = "com.marianomiguel.vitrina"
     static let repositoryURL = URL(string: "https://github.com/MarianoMiguel/vitrina")!
     static let updateFeedURL = URL(string: "https://github.com/MarianoMiguel/vitrina/releases/latest/download/appcast.json")!
 
@@ -17,7 +16,4 @@ enum AppMetadata {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
 
-    static var producerLine: String {
-        "\(companyName), a DBA of \(legalEntity)"
-    }
 }

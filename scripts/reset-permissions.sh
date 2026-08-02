@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BUNDLE_IDS=(
-  "computer.interstellar.vitrina"
+  "com.marianomiguel.vitrina"
   "dev.mariano.dynamic-share-target"
 )
 
