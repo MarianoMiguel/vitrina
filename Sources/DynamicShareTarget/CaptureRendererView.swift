@@ -8,7 +8,6 @@ final class CaptureRendererView: NSView {
         .workingColorSpace: CGColorSpaceCreateDeviceRGB(),
         .outputColorSpace: CGColorSpaceCreateDeviceRGB()
     ])
-    private let messageLabel = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -17,22 +16,6 @@ final class CaptureRendererView: NSView {
         layer?.contentsGravity = .resizeAspect
         layer?.magnificationFilter = .linear
         layer?.minificationFilter = .linear
-
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        messageLabel.alignment = .center
-        messageLabel.textColor = .white
-        messageLabel.font = .systemFont(ofSize: 36, weight: .semibold)
-        messageLabel.lineBreakMode = .byWordWrapping
-        messageLabel.maximumNumberOfLines = 3
-        messageLabel.isHidden = true
-        addSubview(messageLabel)
-
-        NSLayoutConstraint.activate([
-            messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            messageLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 96),
-            messageLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -96)
-        ])
     }
 
     required init?(coder: NSCoder) {
@@ -45,16 +28,39 @@ final class CaptureRendererView: NSView {
     }
 
     func clear() {
-        layer?.contents = nil
-        layer?.backgroundColor = NSColor.black.cgColor
-        messageLabel.isHidden = true
+        showBackground()
     }
 
-    func showMessage(_ message: String) {
-        layer?.contents = nil
-        layer?.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.065, blue: 0.075, alpha: 1).cgColor
-        messageLabel.stringValue = message
-        messageLabel.isHidden = false
+    /// Idle look for the portal: the custom background image if one is set,
+    /// otherwise the user's current wallpaper. No text — the portal is what
+    /// meeting participants see.
+    func showBackground() {
+        AppLogger.shared.log("renderer showBackground custom=\(PortalPreferences.customBackgroundURL?.lastPathComponent ?? "none")")
+        if let image = backgroundImage() {
+            layer?.contentsGravity = .resizeAspectFill
+            layer?.contents = image
+        } else {
+            layer?.contents = nil
+        }
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    private func backgroundImage() -> NSImage? {
+        if let custom = PortalPreferences.customBackgroundURL,
+           let image = NSImage(contentsOf: custom) {
+            return image
+        }
+
+        // The renderer's own screen is the virtual display, which keeps the
+        // default macOS wallpaper; prefer a real display's wallpaper.
+        let ownScreen = window?.screen
+        let screen = NSScreen.screens.first { $0 != ownScreen } ?? NSScreen.main
+        guard let screen,
+              let url = NSWorkspace.shared.desktopImageURL(for: screen),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        return image
     }
 
     func showTestPattern() {
@@ -116,7 +122,6 @@ final class CaptureRendererView: NSView {
 
         layer?.contents = image
         layer?.contentsGravity = .resizeAspect
-        messageLabel.isHidden = true
     }
 
     nonisolated func display(sampleBuffer: CMSampleBuffer) {
@@ -131,8 +136,8 @@ final class CaptureRendererView: NSView {
             guard let cgImage = self.ciContext.createCGImage(image, from: extent) else {
                 return
             }
+            self.layer?.contentsGravity = .resizeAspect
             self.layer?.contents = cgImage
-            self.messageLabel.isHidden = true
         }
     }
 

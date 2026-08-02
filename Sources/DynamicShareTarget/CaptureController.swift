@@ -16,8 +16,20 @@ final class CaptureController: NSObject {
     private let outputQueue = DispatchQueue(label: "\(AppMetadata.bundleIdentifier).screen-output", qos: .userInteractive)
     private let statusHandler: (String) -> Void
 
+    /// Whether the shared frame should include the pointer. Window shares
+    /// only draw it while the pointer is actually inside the shared window;
+    /// ScreenCaptureKit alone would paint it whenever it overlaps the
+    /// window's frame, even with the pointer over another app.
+    private enum CursorPolicy {
+        case always
+        case whenOverWindow(CGWindowID)
+    }
+
     private var currentStream: SCStream?
     private var currentOutput: StreamOutput?
+    private var currentConfiguration: SCStreamConfiguration?
+    private var cursorPolicy: CursorPolicy = .always
+    private var cursorTimer: Timer?
     private var captureRequestID = 0
     private var activeWindowID: CGWindowID?
 
@@ -48,7 +60,6 @@ final class CaptureController: NSObject {
         }
 
         statusHandler("Resolving focused window")
-        renderer.showMessage("Resolving focused window")
 
         Task {
             do {
@@ -64,7 +75,7 @@ final class CaptureController: NSObject {
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
-                        showsCursor: true
+                        cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
             } catch {
@@ -85,7 +96,6 @@ final class CaptureController: NSObject {
         }
 
         statusHandler("Resolving focused monitor")
-        renderer.showMessage("Resolving focused monitor")
 
         Task {
             do {
@@ -103,7 +113,7 @@ final class CaptureController: NSObject {
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
-                        showsCursor: true
+                        cursorPolicy: .always
                     )
                 }
             } catch {
@@ -124,7 +134,6 @@ final class CaptureController: NSObject {
         }
 
         statusHandler("Resolving selected window")
-        renderer.showMessage("Resolving selected window")
 
         Task {
             do {
@@ -138,7 +147,7 @@ final class CaptureController: NSObject {
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
-                        showsCursor: true
+                        cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
             } catch {
@@ -159,7 +168,6 @@ final class CaptureController: NSObject {
         }
 
         statusHandler("Resolving selected monitor")
-        renderer.showMessage("Resolving selected monitor")
 
         Task {
             do {
@@ -174,7 +182,7 @@ final class CaptureController: NSObject {
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
-                        showsCursor: true
+                        cursorPolicy: .always
                     )
                 }
             } catch {
@@ -205,7 +213,7 @@ final class CaptureController: NSObject {
                         filter: filter,
                         sourceName: target.description,
                         sourceSize: target.captureSize,
-                        showsCursor: true
+                        cursorPolicy: .whenOverWindow(target.window.windowID)
                     )
                 }
             } catch {
@@ -223,9 +231,11 @@ final class CaptureController: NSObject {
         }
     }
 
-    func showMessage(_ message: String) {
-        AppLogger.shared.log("renderer message=\(message)")
-        renderer.showMessage(message)
+    /// Repaints the idle background (wallpaper or custom image) when nothing
+    /// is streaming, e.g. after the user changes the background setting.
+    func refreshIdleBackground() {
+        guard currentStream == nil else { return }
+        renderer.showBackground()
     }
 
     func clear() {
@@ -250,13 +260,12 @@ final class CaptureController: NSObject {
         filter: SCContentFilter,
         sourceName: String,
         sourceSize: CGSize,
-        showsCursor: Bool
+        cursorPolicy: CursorPolicy
     ) {
-        AppLogger.shared.log("startCapture source=\(sourceName) sourceSize=\(sourceSize) showsCursor=\(showsCursor)")
+        AppLogger.shared.log("startCapture source=\(sourceName) sourceSize=\(sourceSize)")
         captureRequestID += 1
         let requestID = captureRequestID
         stopCurrentStream()
-        renderer.showMessage("Resizing target")
 
         resizeTarget(sourceSize, sourceName) { [weak self] outputSize in
             Task { @MainActor in
@@ -270,7 +279,7 @@ final class CaptureController: NSObject {
                     filter: filter,
                     sourceName: sourceName,
                     outputSize: outputSize,
-                    showsCursor: showsCursor
+                    cursorPolicy: cursorPolicy
                 )
             }
         }
@@ -281,7 +290,7 @@ final class CaptureController: NSObject {
         filter: SCContentFilter,
         sourceName: String,
         outputSize: CGSize,
-        showsCursor: Bool
+        cursorPolicy: CursorPolicy
     ) {
         guard requestID == captureRequestID else {
             AppLogger.shared.log("startCaptureAfterResize stale request ignored requestID=\(requestID) active=\(captureRequestID)")
@@ -289,7 +298,6 @@ final class CaptureController: NSObject {
         }
 
         AppLogger.shared.log("startCaptureAfterResize requestID=\(requestID) source=\(sourceName) outputSize=\(outputSize)")
-        renderer.showMessage("Starting \(sourceName)")
 
         let configuration = SCStreamConfiguration()
         configuration.width = Int((outputSize.width * pixelScale).rounded())
@@ -297,7 +305,7 @@ final class CaptureController: NSObject {
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.scalesToFit = true
-        configuration.showsCursor = showsCursor
+        configuration.showsCursor = Self.shouldShowCursor(for: cursorPolicy)
         configuration.queueDepth = 4
 
         if #available(macOS 14.0, *) {
@@ -322,6 +330,8 @@ final class CaptureController: NSObject {
 
         currentOutput = output
         currentStream = stream
+        currentConfiguration = configuration
+        self.cursorPolicy = cursorPolicy
 
         AppLogger.shared.log("SCStream startCapture begin")
         stream.startCapture { [weak self] error in
@@ -339,12 +349,17 @@ final class CaptureController: NSObject {
                 } else {
                     AppLogger.shared.log("SCStream startCapture success source=\(sourceName)")
                     self.statusHandler("Sharing \(sourceName)")
+                    self.startCursorTimerIfNeeded()
                 }
             }
         }
     }
 
     private func stopCurrentStream() {
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        currentConfiguration = nil
+
         guard let stream = currentStream else {
             AppLogger.shared.log("stopCurrentStream no current stream")
             currentOutput = nil
@@ -363,16 +378,59 @@ final class CaptureController: NSObject {
         }
     }
 
+    private func startCursorTimerIfNeeded() {
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        guard case .whenOverWindow = cursorPolicy else { return }
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateCursorVisibilityIfNeeded()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorTimer = timer
+    }
+
+    private func updateCursorVisibilityIfNeeded() {
+        guard let stream = currentStream, let configuration = currentConfiguration else { return }
+        let desired = Self.shouldShowCursor(for: cursorPolicy)
+        guard desired != configuration.showsCursor else { return }
+
+        AppLogger.shared.log("cursor visibility change showsCursor=\(desired)")
+        configuration.showsCursor = desired
+        stream.updateConfiguration(configuration) { error in
+            if let error {
+                AppLogger.shared.log("cursor updateConfiguration failed error=\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func shouldShowCursor(for policy: CursorPolicy) -> Bool {
+        switch policy {
+        case .always:
+            return true
+        case .whenOverWindow(let windowID):
+            guard let location = CGEvent(source: nil)?.location,
+                  let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
+                  let boundsDict = info.first?[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
+                return false
+            }
+            return bounds.contains(location)
+        }
+    }
+
     private func presentPermissionFailure(_ message: String, recovery: String) {
-        renderer.showMessage("\(message)\n\(recovery)")
-        statusHandler(message)
+        renderer.showBackground()
+        statusHandler("\(message) — \(recovery)")
     }
 
     private func presentCaptureFailure(prefix: String, error: Error) {
         let message = "\(prefix): \(error.localizedDescription)"
         let recovery = recoverySuggestion(for: error)
-        renderer.showMessage("\(message)\n\(recovery)")
-        statusHandler(message)
+        renderer.showBackground()
+        statusHandler("\(message) \(recovery)")
     }
 
     private func recoverySuggestion(for error: Error) -> String {
@@ -422,7 +480,6 @@ extension CaptureController: SCStreamDelegate {
                 AppLogger.shared.log("SCStream delegate ignored stale streamDidBecomeInactive")
                 return
             }
-            renderer.showMessage("Source inactive")
             statusHandler("Source inactive")
         }
     }

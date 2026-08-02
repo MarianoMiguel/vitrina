@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import UniformTypeIdentifiers
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -45,9 +46,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let resetAllShortcuts: () -> Bool
     private let suspendShortcuts: () -> Void
     private let resumeShortcuts: () -> Void
+    private let portalBackgroundChanged: () -> Void
     private let tabStack = NSStackView()
     private let contentScrollView = NSScrollView()
     private let contentContainer = NSView()
+    private let backgroundValue = NSTextField(labelWithString: "")
     private let permissionsValue = NSTextField(labelWithString: "")
     private let statusValue = NSTextField(labelWithString: "")
     private let targetValue = NSTextField(labelWithString: "")
@@ -79,7 +82,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         resetShortcut: @escaping (HotKeyAction) -> Bool,
         resetAllShortcuts: @escaping () -> Bool,
         suspendShortcuts: @escaping () -> Void,
-        resumeShortcuts: @escaping () -> Void
+        resumeShortcuts: @escaping () -> Void,
+        portalBackgroundChanged: @escaping () -> Void
     ) {
         AppLogger.shared.log("settings init begin")
         self.requestPermissions = requestPermissions
@@ -99,6 +103,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.resetAllShortcuts = resetAllShortcuts
         self.suspendShortcuts = suspendShortcuts
         self.resumeShortcuts = resumeShortcuts
+        self.portalBackgroundChanged = portalBackgroundChanged
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 620),
@@ -150,6 +155,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         displayValue.stringValue = targetDisplayID().map(String.init) ?? "Unavailable"
         launchAtLoginButton?.state = LoginItemController.isEnabled ? .on : .off
         launchAtLoginButton?.title = "Launch at Login: \(launchAtLoginStatus())"
+        backgroundValue.stringValue = PortalPreferences.customBackgroundURL?.lastPathComponent ?? "System wallpaper"
         for action in HotKeyAction.allCases where action != recordingAction {
             shortcutButtons[action]?.title = HotKeyPreferences.shortcut(for: action).displayString
         }
@@ -299,6 +305,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ))
 
         stack.addArrangedSubview(SettingsSectionView(
+            title: "Portal",
+            rows: [
+                SettingsRowView(label: "Background", valueView: backgroundValue),
+                SettingsButtonRowView(
+                    buttons: [
+                        SettingsButton(title: "Choose Image…", target: self, action: #selector(chooseBackgroundClicked)),
+                        SettingsButton(title: "Use Wallpaper", target: self, action: #selector(useWallpaperClicked))
+                    ]
+                )
+            ]
+        ))
+
+        stack.addArrangedSubview(SettingsSectionView(
             title: "Permissions",
             rows: [
                 SettingsRowView(label: "Status", valueView: permissionsValue),
@@ -338,6 +357,28 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         refresh()
         return stack
+    }
+
+    @objc private func chooseBackgroundClicked() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+        panel.message = "Choose the portal background image"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        PortalPreferences.setCustomBackgroundPath(url.path)
+        AppLogger.shared.log("portal background set path=\(url.path)")
+        portalBackgroundChanged()
+        refresh()
+    }
+
+    @objc private func useWallpaperClicked() {
+        PortalPreferences.setCustomBackgroundPath(nil)
+        AppLogger.shared.log("portal background reset to wallpaper")
+        portalBackgroundChanged()
+        refresh()
     }
 
     @objc private func requestPermissionsClicked() {

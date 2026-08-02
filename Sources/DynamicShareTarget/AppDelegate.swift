@@ -38,6 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         updateStatus("Starting")
 
+        // Diagnostic escape hatch while investigating status item adoption.
+        if ProcessInfo.processInfo.environment["PEEKPORTAL_SKIP_VDISPLAY"] == "1" {
+            AppLogger.shared.log("PEEKPORTAL_SKIP_VDISPLAY set; not creating virtual display")
+            return
+        }
+
         do {
             AppLogger.shared.log("creating virtual display")
             let virtualDisplayController = try VirtualDisplayController(
@@ -68,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 )
                 self.configureHotKeys()
-                renderer.showMessage(PermissionController.permissionSummary())
+                renderer.showBackground()
                 self.updateStatus(PermissionController.permissionSummary())
                 self.showOnboardingIfNeeded()
             }
@@ -87,7 +93,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
+        // A stale system record for the default "Item-0" identity can leave
+        // the icon parked off the menu bar (seen after menu bar managers like
+        // Ice have run). Use an app-specific autosave identity and seed its
+        // first-run position near the clock so the icon lands somewhere
+        // visible.
+        let autosaveName = "PeekPortalStatusItem"
+        let positionKey = "NSStatusItem Preferred Position \(autosaveName)"
+        if UserDefaults.standard.object(forKey: positionKey) == nil {
+            UserDefaults.standard.set(60, forKey: positionKey)
+        }
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.autosaveName = autosaveName
+        item.isVisible = true
         if let image = NSImage(
             systemSymbolName: "rectangle.on.rectangle",
             accessibilityDescription: appName
@@ -98,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.title = "PP"
         }
         item.button?.toolTip = appName
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let item = self?.statusItem else { return }
+            let frame = item.button?.window?.frame
+            let screen = item.button?.window?.screen?.localizedName
+            AppLogger.shared.log("statusItem placement isVisible=\(item.isVisible) windowFrame=\(String(describing: frame)) screen=\(screen ?? "none")")
+        }
 
         let menu = NSMenu()
         menu.delegate = self
@@ -289,9 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func requestPermissions() {
         AppLogger.shared.log("menu/action requestPermissions")
         PermissionController.requestMissingPermissions()
-        let status = PermissionController.permissionSummary()
-        captureController?.showMessage(status)
-        updateStatus(status)
+        updateStatus(PermissionController.permissionSummary())
     }
 
     @objc private func copyLogPath() {
@@ -354,6 +378,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 resumeShortcuts: { [weak self] in
                     self?.resumeShortcutsAfterRecording()
+                },
+                portalBackgroundChanged: { [weak self] in
+                    self?.captureController?.refreshIdleBackground()
                 }
             )
         }
