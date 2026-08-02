@@ -5,12 +5,14 @@ enum HotKeyAction: Int, CaseIterable, Hashable {
     case focusedWindow = 1
     case focusedMonitor = 2
     case clear = 3
+    case followFocus = 4
 
     var title: String {
         switch self {
         case .focusedWindow: "Focused Window"
         case .focusedMonitor: "Focused Monitor"
         case .clear: "Clear"
+        case .followFocus: "Follow Focus"
         }
     }
 
@@ -19,6 +21,7 @@ enum HotKeyAction: Int, CaseIterable, Hashable {
         case .focusedWindow: "focusedWindow"
         case .focusedMonitor: "focusedMonitor"
         case .clear: "clear"
+        case .followFocus: "followFocus"
         }
     }
 
@@ -30,6 +33,8 @@ enum HotKeyAction: Int, CaseIterable, Hashable {
             HotKeyShortcut(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(controlKey | optionKey))
         case .clear:
             HotKeyShortcut(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(controlKey | optionKey))
+        case .followFocus:
+            HotKeyShortcut(keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(controlKey | optionKey))
         }
     }
 

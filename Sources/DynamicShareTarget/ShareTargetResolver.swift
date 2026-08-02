@@ -35,8 +35,41 @@ struct DisplayTarget {
     }
 
     var description: String {
-        "display \(display.displayID)"
+        DisplayNames.name(for: display.displayID)
     }
+}
+
+enum DisplayNames {
+    static func name(for displayID: CGDirectDisplayID) -> String {
+        let screen = NSScreen.screens.first { $0.displayID == displayID }
+        return screen?.localizedName ?? "Display \(displayID)"
+    }
+}
+
+struct PickableWindow {
+    let windowID: CGWindowID
+    let processID: pid_t?
+    let appName: String
+    let title: String
+
+    var menuTitle: String {
+        title.isEmpty ? appName : "\(appName) — \(title)"
+    }
+}
+
+struct PickableDisplay {
+    let displayID: CGDirectDisplayID
+    let name: String
+    let size: CGSize
+
+    var menuTitle: String {
+        "\(name)  (\(Int(size.width))×\(Int(size.height)))"
+    }
+}
+
+struct PickerContent {
+    let windows: [PickableWindow]
+    let displays: [PickableDisplay]
 }
 
 final class ShareTargetResolver {
@@ -116,6 +149,81 @@ final class ShareTargetResolver {
 
         AppLogger.shared.log("resolver.focusedDisplay no display")
         throw DynamicShareTargetError.focusedDisplayUnavailable
+    }
+
+    func pickerContent(excludingDisplayIDs: Set<CGDirectDisplayID>) async throws -> PickerContent {
+        let content = try await shareableContent()
+        let ownProcessID = ProcessInfo.processInfo.processIdentifier
+
+        var windowsByID: [CGWindowID: SCWindow] = [:]
+        for window in content.windows
+        where window.owningApplication?.processID != ownProcessID
+            && window.isOnScreen
+            && window.windowLayer == 0
+            && window.frame.area >= 1 {
+            windowsByID[window.windowID] = window
+        }
+
+        // Front-to-back z-order from CGWindowList, then whatever SCK knows about that CGWindowList missed.
+        var orderedWindows: [SCWindow] = []
+        var seenWindowIDs: Set<CGWindowID> = []
+        for info in orderedOnScreenWindowInfo() {
+            guard let windowID = info.windowID,
+                  let window = windowsByID[windowID],
+                  !seenWindowIDs.contains(windowID) else {
+                continue
+            }
+            seenWindowIDs.insert(windowID)
+            orderedWindows.append(window)
+        }
+        let remaining = windowsByID.values
+            .filter { !seenWindowIDs.contains($0.windowID) }
+            .sorted { ($0.owningApplication?.applicationName ?? "") < ($1.owningApplication?.applicationName ?? "") }
+        orderedWindows.append(contentsOf: remaining)
+
+        let windows = orderedWindows.map { window in
+            PickableWindow(
+                windowID: window.windowID,
+                processID: window.owningApplication?.processID,
+                appName: window.owningApplication?.applicationName ?? "Window",
+                title: window.title ?? ""
+            )
+        }
+
+        let displays = content.displays
+            .filter { !excludingDisplayIDs.contains($0.displayID) }
+            .map { display in
+                PickableDisplay(
+                    displayID: display.displayID,
+                    name: DisplayNames.name(for: display.displayID),
+                    size: display.frame.size
+                )
+            }
+
+        AppLogger.shared.log("resolver.pickerContent windows=\(windows.count) displays=\(displays.count)")
+        return PickerContent(windows: windows, displays: displays)
+    }
+
+    func window(withID windowID: CGWindowID) async throws -> WindowTarget {
+        let content = try await shareableContent()
+        guard let window = content.windows.first(where: { $0.windowID == windowID }),
+              window.isOnScreen else {
+            AppLogger.shared.log("resolver.window(withID:) missing windowID=\(windowID)")
+            throw DynamicShareTargetError.selectedWindowUnavailable
+        }
+        return WindowTarget(window: window)
+    }
+
+    func display(withID displayID: CGDirectDisplayID) async throws -> DisplayTarget {
+        let content = try await shareableContent()
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+            AppLogger.shared.log("resolver.display(withID:) missing displayID=\(displayID)")
+            throw DynamicShareTargetError.selectedDisplayUnavailable
+        }
+        let currentApp = content.applications.first {
+            $0.processID == ProcessInfo.processInfo.processIdentifier
+        }
+        return DisplayTarget(display: display, excludedCurrentApplication: currentApp)
     }
 
     private var frontmostProcessID: pid_t? {

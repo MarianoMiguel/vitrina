@@ -39,6 +39,11 @@ final class CaptureRendererView: NSView {
         nil
     }
 
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        layer?.contentsScale = window?.backingScaleFactor ?? 1
+    }
+
     func clear() {
         layer?.contents = nil
         layer?.backgroundColor = NSColor.black.cgColor

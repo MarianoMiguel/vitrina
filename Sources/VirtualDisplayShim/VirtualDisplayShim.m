@@ -62,8 +62,8 @@
     CGVirtualDisplayDescriptor *descriptor = [[descriptorClass alloc] init];
     descriptor.queue = dispatch_get_main_queue();
     descriptor.name = name;
-    descriptor.maxPixelsWide = (uint32_t)width;
-    descriptor.maxPixelsHigh = (uint32_t)height;
+    descriptor.maxPixelsWide = (uint32_t)maxWidth;
+    descriptor.maxPixelsHigh = (uint32_t)maxHeight;
     descriptor.vendorID = 0x445354;
     descriptor.productID = 1;
     descriptor.serialNum = arc4random();
@@ -80,8 +80,8 @@
     }
 
     _display = display;
-    _maxWidth = width;
-    _maxHeight = height;
+    _maxWidth = maxWidth;
+    _maxHeight = maxHeight;
 
     if (![self resizeToWidth:width height:height highDPI:highDPI]) {
         return nil;
@@ -100,10 +100,14 @@
         return NO;
     }
 
+    // Widths/heights are pixel dimensions; CGVirtualDisplayMode takes point
+    // dimensions, so hiDPI modes are halved.
     NSUInteger modeWidth = highDPI ? width / 2 : width;
     NSUInteger modeHeight = highDPI ? height / 2 : height;
+    NSUInteger maxModeWidth = highDPI ? self.maxWidth / 2 : self.maxWidth;
+    NSUInteger maxModeHeight = highDPI ? self.maxHeight / 2 : self.maxHeight;
     CGVirtualDisplayMode *mode = [[modeClass alloc] initWithWidth:modeWidth height:modeHeight refreshRate:60.0];
-    CGVirtualDisplayMode *maxMode = [[modeClass alloc] initWithWidth:self.maxWidth height:self.maxHeight refreshRate:60.0];
+    CGVirtualDisplayMode *maxMode = [[modeClass alloc] initWithWidth:maxModeWidth height:maxModeHeight refreshRate:60.0];
     CGVirtualDisplaySettings *settings = [[settingsClass alloc] init];
     settings.hiDPI = highDPI;
     if (width == self.maxWidth && height == self.maxHeight) {

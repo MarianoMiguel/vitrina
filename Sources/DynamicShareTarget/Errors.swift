@@ -6,6 +6,8 @@ enum DynamicShareTargetError: LocalizedError {
     case focusedWindowNotShareable
     case shareableContentUnavailable
     case focusedDisplayUnavailable
+    case selectedWindowUnavailable
+    case selectedDisplayUnavailable
     case virtualDisplayUnavailable
     case virtualDisplayScreenUnavailable
     case hotKeyRegistrationFailed(String)
@@ -23,6 +25,10 @@ enum DynamicShareTargetError: LocalizedError {
             return "ScreenCaptureKit did not return shareable content."
         case .focusedDisplayUnavailable:
             return "No focused display was available."
+        case .selectedWindowUnavailable:
+            return "The selected window is no longer available."
+        case .selectedDisplayUnavailable:
+            return "The selected display is no longer available."
         case .virtualDisplayUnavailable:
             return "The virtual display API was not available."
         case .virtualDisplayScreenUnavailable:

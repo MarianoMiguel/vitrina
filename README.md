@@ -2,15 +2,21 @@
 
 PeekPortal is a macOS utility for a Niri-like screen sharing workflow.
 
-The app creates a virtual display named `PeekPortal`, then lets you switch what appears there with global hotkeys. Defaults are:
+The app creates a virtual display named `PeekPortal`, then lets you switch what appears there with global hotkeys or from the menu bar. Default shortcuts are:
 
 - `Control+Option+W`: share the focused window
 - `Control+Option+M`: share the monitor containing the focused window
+- `Control+Option+F`: toggle Follow Focus (the share target tracks the active window)
 - `Control+Option+C`: clear to a black frame
 
-The virtual display is resized to match the selected window or monitor before
-capture starts. This keeps non-16:9 windows from being stretched inside the
-shared target, and single-window captures drop the macOS shadow padding.
+The menu bar also has explicit pickers: `Share Window` lists every shareable
+window (with app icons, front-to-back), and `Share Monitor` lists every
+physical display by name. Both are populated live when the menu opens.
+
+The virtual display runs in HiDPI (2x) mode and is resized to match the
+selected window or monitor before capture starts. This keeps non-16:9 windows
+from being stretched inside the shared target, keeps Retina text crisp, and
+single-window captures drop the macOS shadow padding.
 
 The menu bar icon shows the current status, the current target mode, primary
 share actions with their active shortcuts, a test target, settings, diagnostics,
@@ -60,11 +66,14 @@ virtual display classes, similar to the approach used by DeskPad.
 Licensing is not active yet. Updates has a manual appcast check path that can be
 replaced by Sparkle once the signed release channel is ready.
 
-Stage Manager support is best-effort. The app keeps its target panel from
-hiding when deactivated and joins all spaces. Stronger Stage Manager flags are
-avoided by default because they can make the target disappear from some meeting
-apps' share pickers. macOS may still hide the original source window when Stage
-Manager moves that app out of the current stage.
+Stage Manager support is explicit rather than best-effort: macOS stops
+delivering frames for windows that Stage Manager moves off the current stage,
+so only the active window can be displayed reliably. When Stage Manager is on,
+the menu says so and `Share Focused Window` degrades to Follow Focus, tracking
+whatever window is active. The app also keeps its target panel from hiding when
+deactivated and joins all spaces; stronger Stage Manager flags are avoided
+because they can make the target disappear from some meeting apps' share
+pickers.
 
 ## Debug logs
 

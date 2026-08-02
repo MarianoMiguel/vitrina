@@ -3,6 +3,9 @@ import VirtualDisplayShim
 
 @MainActor
 final class VirtualDisplayController {
+    // Sizes are in points; the display runs HiDPI so pixel dimensions are
+    // pointSize * pixelScale.
+    static let pixelScale: CGFloat = 2
     private static let initialSize = CGSize(width: 1920, height: 1080)
     private static let maximumSize = CGSize(width: 1920, height: 1080)
     private static let minimumSize = CGSize(width: 640, height: 360)
@@ -17,16 +20,20 @@ final class VirtualDisplayController {
         display.displayID
     }
 
+    var pixelScale: CGFloat {
+        Self.pixelScale
+    }
+
     init(name: String, width: Int, height: Int) throws {
-        AppLogger.shared.log("VirtualDisplayController init name=\(name) width=\(width) height=\(height)")
+        AppLogger.shared.log("VirtualDisplayController init name=\(name) width=\(width) height=\(height) pixelScale=\(Self.pixelScale)")
         guard let display = DSTVirtualDisplay(
             name: name,
-            width: UInt(width),
-            height: UInt(height),
-            maxWidth: UInt(Self.maximumSize.width),
-            maxHeight: UInt(Self.maximumSize.height),
-            pixelsPerInch: 110,
-            highDPI: false
+            width: UInt(CGFloat(width) * Self.pixelScale),
+            height: UInt(CGFloat(height) * Self.pixelScale),
+            maxWidth: UInt(Self.maximumSize.width * Self.pixelScale),
+            maxHeight: UInt(Self.maximumSize.height * Self.pixelScale),
+            pixelsPerInch: UInt(110 * Self.pixelScale),
+            highDPI: true
         ) else {
             throw DynamicShareTargetError.virtualDisplayUnavailable
         }
@@ -92,7 +99,11 @@ final class VirtualDisplayController {
             return
         }
 
-        guard display.resize(toWidth: UInt(targetSize.width), height: UInt(targetSize.height), highDPI: false) else {
+        guard display.resize(
+            toWidth: UInt((targetSize.width * Self.pixelScale).rounded()),
+            height: UInt((targetSize.height * Self.pixelScale).rounded()),
+            highDPI: true
+        ) else {
             AppLogger.shared.log("resizeTarget failed to apply virtual display mode; keeping current=\(currentSize)")
             refreshTargetWindow(reason: "resize failed \(reason)", expectedSize: nil) { [weak self] resolvedSize in
                 guard let self else { return }

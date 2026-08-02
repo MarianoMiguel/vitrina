@@ -11,6 +11,7 @@ final class CaptureController: NSObject {
     private let resolver = ShareTargetResolver()
     private let initialOutputSize: CGSize
     private let excludedDisplayIDs: Set<CGDirectDisplayID>
+    private let pixelScale: CGFloat
     private let resizeTarget: ResizeTargetHandler
     private let outputQueue = DispatchQueue(label: "\(AppMetadata.bundleIdentifier).screen-output", qos: .userInteractive)
     private let statusHandler: (String) -> Void
@@ -18,21 +19,24 @@ final class CaptureController: NSObject {
     private var currentStream: SCStream?
     private var currentOutput: StreamOutput?
     private var captureRequestID = 0
+    private var activeWindowID: CGWindowID?
 
     init(
         renderer: CaptureRendererView,
         outputSize: CGSize,
         excludedDisplayIDs: Set<CGDirectDisplayID>,
+        pixelScale: CGFloat,
         resizeTarget: @escaping ResizeTargetHandler,
         statusHandler: @escaping (String) -> Void
     ) {
         self.renderer = renderer
         self.initialOutputSize = outputSize
         self.excludedDisplayIDs = excludedDisplayIDs
+        self.pixelScale = pixelScale
         self.resizeTarget = resizeTarget
         self.statusHandler = statusHandler
         super.init()
-        AppLogger.shared.log("CaptureController init outputSize=\(outputSize) excludedDisplayIDs=\(Array(excludedDisplayIDs))")
+        AppLogger.shared.log("CaptureController init outputSize=\(outputSize) pixelScale=\(pixelScale) excludedDisplayIDs=\(Array(excludedDisplayIDs))")
     }
 
     func shareFocusedWindow() {
@@ -55,6 +59,7 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("shareFocusedWindow filter created")
 
                 await MainActor.run {
+                    self.activeWindowID = target.window.windowID
                     self.startCapture(
                         filter: filter,
                         sourceName: target.description,
@@ -93,6 +98,7 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("shareFocusedMonitor filter created")
 
                 await MainActor.run {
+                    self.activeWindowID = nil
                     self.startCapture(
                         filter: filter,
                         sourceName: target.description,
@@ -109,6 +115,114 @@ final class CaptureController: NSObject {
         }
     }
 
+    func shareWindow(withID windowID: CGWindowID) {
+        AppLogger.shared.log("shareWindow(withID:) start windowID=\(windowID)")
+        guard PermissionController.hasScreenCapturePermission() else {
+            presentPermissionFailure("Screen Recording required", recovery: "Open Settings > Permissions")
+            PermissionController.requestScreenCaptureIfNeeded()
+            return
+        }
+
+        statusHandler("Resolving selected window")
+        renderer.showMessage("Resolving selected window")
+
+        Task {
+            do {
+                let target = try await resolver.window(withID: windowID)
+                AppLogger.shared.log("shareWindow(withID:) resolved windowID=\(windowID) title=\(target.window.title ?? "")")
+                let filter = SCContentFilter(desktopIndependentWindow: target.window)
+
+                await MainActor.run {
+                    self.activeWindowID = target.window.windowID
+                    self.startCapture(
+                        filter: filter,
+                        sourceName: target.description,
+                        sourceSize: target.captureSize,
+                        showsCursor: true
+                    )
+                }
+            } catch {
+                AppLogger.shared.log("shareWindow(withID:) failed error=\(error.localizedDescription)")
+                await MainActor.run {
+                    self.presentCaptureFailure(prefix: "Window failed", error: error)
+                }
+            }
+        }
+    }
+
+    func shareDisplay(withID displayID: CGDirectDisplayID) {
+        AppLogger.shared.log("shareDisplay(withID:) start displayID=\(displayID)")
+        guard PermissionController.hasScreenCapturePermission() else {
+            presentPermissionFailure("Screen Recording required", recovery: "Open Settings > Permissions")
+            PermissionController.requestScreenCaptureIfNeeded()
+            return
+        }
+
+        statusHandler("Resolving selected monitor")
+        renderer.showMessage("Resolving selected monitor")
+
+        Task {
+            do {
+                let target = try await resolver.display(withID: displayID)
+                let filter = target.excludedCurrentApplication.map {
+                    SCContentFilter(display: target.display, excludingApplications: [$0], exceptingWindows: [])
+                } ?? SCContentFilter(display: target.display, excludingWindows: [])
+
+                await MainActor.run {
+                    self.activeWindowID = nil
+                    self.startCapture(
+                        filter: filter,
+                        sourceName: target.description,
+                        sourceSize: target.captureSize,
+                        showsCursor: true
+                    )
+                }
+            } catch {
+                AppLogger.shared.log("shareDisplay(withID:) failed error=\(error.localizedDescription)")
+                await MainActor.run {
+                    self.presentCaptureFailure(prefix: "Monitor failed", error: error)
+                }
+            }
+        }
+    }
+
+    /// Retargets to the currently focused window if it differs from the shared
+    /// one. Failures are logged but never shown: this runs on every focus
+    /// change, and flashing errors mid-share would be worse than keeping the
+    /// last good frame.
+    func followFocusRefresh() {
+        guard PermissionController.hasScreenCapturePermission() else { return }
+
+        Task {
+            do {
+                let target = try await resolver.focusedWindow()
+                await MainActor.run {
+                    guard target.window.windowID != self.activeWindowID else { return }
+                    AppLogger.shared.log("followFocusRefresh retarget windowID=\(target.window.windowID) title=\(target.window.title ?? "")")
+                    let filter = SCContentFilter(desktopIndependentWindow: target.window)
+                    self.activeWindowID = target.window.windowID
+                    self.startCapture(
+                        filter: filter,
+                        sourceName: target.description,
+                        sourceSize: target.captureSize,
+                        showsCursor: true
+                    )
+                }
+            } catch {
+                AppLogger.shared.log("followFocusRefresh skipped error=\(error.localizedDescription)")
+            }
+        }
+    }
+
+    func pickerContent() async -> PickerContent? {
+        do {
+            return try await resolver.pickerContent(excludingDisplayIDs: excludedDisplayIDs)
+        } catch {
+            AppLogger.shared.log("pickerContent failed error=\(error.localizedDescription)")
+            return nil
+        }
+    }
+
     func showMessage(_ message: String) {
         AppLogger.shared.log("renderer message=\(message)")
         renderer.showMessage(message)
@@ -117,6 +231,7 @@ final class CaptureController: NSObject {
     func clear() {
         AppLogger.shared.log("clear")
         captureRequestID += 1
+        activeWindowID = nil
         stopCurrentStream()
         renderer.clear()
         statusHandler("Clear")
@@ -125,6 +240,7 @@ final class CaptureController: NSObject {
     func showTestPattern() {
         AppLogger.shared.log("showTestPattern initialOutputSize=\(initialOutputSize)")
         captureRequestID += 1
+        activeWindowID = nil
         stopCurrentStream()
         renderer.showTestPattern()
         statusHandler("Showing test target")
@@ -176,8 +292,8 @@ final class CaptureController: NSObject {
         renderer.showMessage("Starting \(sourceName)")
 
         let configuration = SCStreamConfiguration()
-        configuration.width = Int(outputSize.width.rounded())
-        configuration.height = Int(outputSize.height.rounded())
+        configuration.width = Int((outputSize.width * pixelScale).rounded())
+        configuration.height = Int((outputSize.height * pixelScale).rounded())
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         configuration.scalesToFit = true
@@ -273,6 +389,10 @@ final class CaptureController: NSObject {
             return "Choose a different window."
         case .focusedDisplayUnavailable:
             return "Move the pointer to the display and try again."
+        case .selectedWindowUnavailable:
+            return "The window closed or moved off screen. Pick another target."
+        case .selectedDisplayUnavailable:
+            return "The display disconnected. Pick another target."
         case .shareableContentUnavailable:
             return "Grant Screen Recording and relaunch if needed."
         case .virtualDisplayUnavailable, .virtualDisplayScreenUnavailable:
