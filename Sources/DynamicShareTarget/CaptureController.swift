@@ -620,7 +620,7 @@ final class CaptureController: NSObject {
         case .shareableContentUnavailable:
             return "Grant Screen Recording and relaunch if needed."
         case .virtualDisplayUnavailable, .virtualDisplayScreenUnavailable:
-            return "Quit and relaunch PeekPortal."
+            return "Quit and relaunch Vitrina."
         case .hotKeyRegistrationFailed, .launchAtLoginUnavailable:
             return "Open Settings and copy diagnostics."
         }

@@ -3,12 +3,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "dynamic-share-target",
+    name: "vitrina",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "dynamic-share-target", targets: ["DynamicShareTarget"])
+        .executable(name: "vitrina", targets: ["DynamicShareTarget"])
     ],
     targets: [
         .target(

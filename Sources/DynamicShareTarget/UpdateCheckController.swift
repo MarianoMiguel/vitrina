@@ -56,7 +56,7 @@ enum UpdateCheckController {
         }
 
         return UpdateCheckResult(
-            title: "PeekPortal is up to date",
+            title: "Vitrina is up to date",
             detail: "Current version: \(currentVersion)"
         )
     }

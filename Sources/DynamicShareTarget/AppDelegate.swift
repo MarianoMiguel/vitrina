@@ -60,8 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatus("Starting")
 
         // Diagnostic escape hatch while investigating status item adoption.
-        if ProcessInfo.processInfo.environment["PEEKPORTAL_SKIP_VDISPLAY"] == "1" {
-            AppLogger.shared.log("PEEKPORTAL_SKIP_VDISPLAY set; not creating virtual display")
+        if ProcessInfo.processInfo.environment["VITRINA_SKIP_VDISPLAY"] == "1" {
+            AppLogger.shared.log("VITRINA_SKIP_VDISPLAY set; not creating virtual display")
             return
         }
 
@@ -105,16 +105,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.updateStatus(PermissionController.permissionSummary())
                 self.showOnboardingIfNeeded()
 
-                // Diagnostic hook: PEEKPORTAL_TEST_RESIZE=WxH exercises the
+                // Diagnostic hook: VITRINA_TEST_RESIZE=WxH exercises the
                 // virtual display resize without needing a capture source.
-                if let spec = ProcessInfo.processInfo.environment["PEEKPORTAL_TEST_RESIZE"] {
+                if let spec = ProcessInfo.processInfo.environment["VITRINA_TEST_RESIZE"] {
                     let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
                     if parts.count == 2 {
                         virtualDisplayController.resizeTarget(
                             to: CGSize(width: parts[0], height: parts[1]),
                             reason: "env test"
                         ) { size in
-                            AppLogger.shared.log("PEEKPORTAL_TEST_RESIZE requested=\(spec) result=\(size)")
+                            AppLogger.shared.log("VITRINA_TEST_RESIZE requested=\(spec) result=\(size)")
                         }
                     }
                 }
@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ice have run). Use an app-specific autosave identity and seed its
         // first-run position near the clock so the icon lands somewhere
         // visible.
-        let autosaveName = "PeekPortalStatusItem"
+        let autosaveName = "VitrinaStatusItem"
         let positionKey = "NSStatusItem Preferred Position \(autosaveName)"
         if UserDefaults.standard.object(forKey: positionKey) == nil {
             UserDefaults.standard.set(60, forKey: positionKey)
@@ -155,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             image.isTemplate = true
             item.button?.image = image
         } else {
-            item.button?.title = "PP"
+            item.button?.title = "V"
         }
         item.button?.toolTip = appName
 
@@ -720,8 +720,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()
-        alert.messageText = "PeekPortal's menu bar icon is hidden"
-        alert.informativeText = "macOS is set to hide PeekPortal in the menu bar. Open System Settings > Menu Bar, find PeekPortal, and turn on Show in Menu Bar. The icon appears immediately — no relaunch needed."
+        alert.messageText = "Vitrina's menu bar icon is hidden"
+        alert.informativeText = "macOS is set to hide Vitrina in the menu bar. Open System Settings > Menu Bar, find Vitrina, and turn on Show in Menu Bar. The icon appears immediately — no relaunch needed."
         alert.addButton(withTitle: "Open Menu Bar Settings")
         alert.addButton(withTitle: "Later")
 

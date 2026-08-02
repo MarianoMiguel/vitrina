@@ -14,7 +14,7 @@ final class AppLogger {
     private init() {
         let logsDirectory = FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/PeekPortal", isDirectory: true)
+            .appendingPathComponent("Library/Logs/Vitrina", isDirectory: true)
         self.logURL = logsDirectory.appendingPathComponent("debug.log")
         self.formatter = ISO8601DateFormatter()
         self.formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

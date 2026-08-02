@@ -46,8 +46,8 @@ final class VirtualDisplayController {
 
     func prepareTargetWindow(completion: @escaping (CaptureRendererView) -> Void) {
         AppLogger.shared.log("prepareTargetWindow")
-        if ProcessInfo.processInfo.environment["PEEKPORTAL_SKIP_TARGETWINDOW"] == "1" {
-            AppLogger.shared.log("PEEKPORTAL_SKIP_TARGETWINDOW set; not creating target window")
+        if ProcessInfo.processInfo.environment["VITRINA_SKIP_TARGETWINDOW"] == "1" {
+            AppLogger.shared.log("VITRINA_SKIP_TARGETWINDOW set; not creating target window")
             return
         }
         waitForScreen(attemptsRemaining: 20) { [weak self] screen in

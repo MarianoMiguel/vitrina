@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="PeekPortal"
+APP_NAME="Vitrina"
 CONFIG="${CONFIGURATION:-debug}"
-SIGN_IDENTITY="${SIGN_IDENTITY:-PeekPortal Local}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-Vitrina Local}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/dist}"
 
 export CLANG_MODULE_CACHE_PATH="$ROOT/.build/clang-module-cache"
@@ -12,12 +12,12 @@ mkdir -p "$CLANG_MODULE_CACHE_PATH"
 
 swift build -c "$CONFIG"
 
-BIN="$ROOT/.build/$CONFIG/dynamic-share-target"
+BIN="$ROOT/.build/$CONFIG/vitrina"
 APP="$OUTPUT_DIR/$APP_NAME.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/peekportal"
+cp "$BIN" "$APP/Contents/MacOS/vitrina"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 if command -v codesign >/dev/null 2>&1; then

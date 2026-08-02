@@ -75,7 +75,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         let title = NSTextField(labelWithString: "Set Up Permissions")
         title.font = .systemFont(ofSize: 24, weight: .semibold)
 
-        let body = NSTextField(wrappingLabelWithString: "PeekPortal needs these macOS permissions before it can switch the shared target reliably.")
+        let body = NSTextField(wrappingLabelWithString: "Vitrina needs these macOS permissions before it can switch the shared target reliably.")
         body.font = .systemFont(ofSize: 14)
         body.textColor = .secondaryLabelColor
         body.preferredMaxLayoutWidth = 460

@@ -13,4 +13,4 @@ security add-trusted-cert \
   -k "$LOGIN_KEYCHAIN" \
   "$CERT" >/dev/null
 
-echo "Trusted PeekPortal local signing certificate for code signing"
+echo "Trusted Vitrina local signing certificate for code signing"

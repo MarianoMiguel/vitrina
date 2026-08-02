@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>peekportal</string>
+    <string>vitrina</string>
     <key>CFBundleIdentifier</key>
-    <string>computer.interstellar.peekportal</string>
+    <string>computer.interstellar.vitrina</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>PeekPortal</string>
+    <string>Vitrina</string>
     <key>CFBundleDisplayName</key>
-    <string>PeekPortal</string>
+    <string>Vitrina</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

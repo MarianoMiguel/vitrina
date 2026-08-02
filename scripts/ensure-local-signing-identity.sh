@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STORE="$ROOT/.local-codesign"
-KEYCHAIN="$STORE/PeekPortal.keychain-db"
-CERT_NAME="PeekPortal Local"
+KEYCHAIN="$STORE/Vitrina.keychain-db"
+CERT_NAME="Vitrina Local"
 PASSWORD_FILE="$STORE/password"
 OPENSSL_CONFIG="$STORE/openssl.cnf"
 CERT_PEM="$STORE/cert.pem"

@@ -5,3 +5,4 @@
 .local-codesign.broken-*/
 dist/
 DerivedData/
+.claude/

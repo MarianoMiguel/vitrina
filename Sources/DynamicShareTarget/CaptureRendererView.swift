@@ -134,7 +134,7 @@ final class CaptureRendererView: NSView {
             .foregroundColor: NSColor.white.withAlphaComponent(0.85)
         ]
 
-        drawCentered("PeekPortal", in: panelRect.offsetBy(dx: 0, dy: panelRect.height * 0.12), attributes: titleAttributes)
+        drawCentered("Vitrina", in: panelRect.offsetBy(dx: 0, dy: panelRect.height * 0.12), attributes: titleAttributes)
         drawCentered("Test Share Target", in: panelRect.offsetBy(dx: 0, dy: -panelRect.height * 0.18), attributes: detailAttributes)
 
         NSColor.white.withAlphaComponent(0.9).setStroke()

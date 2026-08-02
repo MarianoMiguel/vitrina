@@ -296,7 +296,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .license:
             SettingsTextStack(
                 title: "License",
-                body: "Licensing is not active in this local build. Commercial licensing will be added after the merchant provider is authorized.",
+                body: "Vitrina is free and open source software, released under the MIT License. Source code, issues, and contributions live at \(AppMetadata.repositoryURL.absoluteString).",
                 detail: "Produced by \(AppMetadata.producerLine)"
             )
         }
@@ -620,7 +620,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         titleLabel.font = .systemFont(ofSize: 24, weight: .semibold)
         titleLabel.textColor = .labelColor
 
-        let bodyLabel = NSTextField(wrappingLabelWithString: "PeekPortal has a manual update check wired to the appcast feed. Sparkle can replace this path when the signed release channel is ready.")
+        let bodyLabel = NSTextField(wrappingLabelWithString: "Vitrina has a manual update check wired to the appcast feed. Sparkle can replace this path when the signed release channel is ready.")
         bodyLabel.font = .systemFont(ofSize: 15)
         bodyLabel.textColor = .labelColor
         bodyLabel.preferredMaxLayoutWidth = 560
