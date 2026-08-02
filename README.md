@@ -46,7 +46,7 @@ The idea comes from [niri](https://github.com/niri-wm/niri)'s dynamic cast targe
 
 ## Install
 
-Homebrew (available with the first tagged release):
+Homebrew:
 
 ```sh
 brew install marianomiguel/tap/vitrina

@@ -9,7 +9,7 @@ enum AppMetadata {
     static let updateFeedURL = URL(string: "https://github.com/MarianoMiguel/vitrina/releases/latest/download/appcast.json")!
 
     static var versionString: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
     static var buildString: String {
