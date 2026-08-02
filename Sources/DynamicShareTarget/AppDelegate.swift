@@ -133,10 +133,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = appName
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let item = self?.statusItem else { return }
+            guard let self, let item = self.statusItem else { return }
             let frame = item.button?.window?.frame
             let screen = item.button?.window?.screen?.localizedName
             AppLogger.shared.log("statusItem placement isVisible=\(item.isVisible) windowFrame=\(String(describing: frame)) screen=\(screen ?? "none")")
+
+            // macOS 26 keeps a per-app "Show in Menu Bar" registry; when this
+            // app is recorded as hidden, ControlCenter parks the item at the
+            // bottom-left of the screen instead of adopting it into the bar.
+            // Detect that and point the user at the setting.
+            let parked = item.button?.window?.screen == nil || (frame.map { $0.minY < 0 } ?? true)
+            if parked {
+                self.presentMenuBarHiddenNotice()
+            }
         }
 
         let menu = NSMenu()
@@ -615,6 +624,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Shortcuts:
         \(shortcuts)
         """
+    }
+
+    private func presentMenuBarHiddenNotice() {
+        AppLogger.shared.log("statusItem parked; presenting menu bar hidden notice")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.messageText = "PeekPortal's menu bar icon is hidden"
+        alert.informativeText = "macOS is set to hide PeekPortal in the menu bar. Open System Settings > Menu Bar, find PeekPortal, and turn on Show in Menu Bar. The icon appears immediately — no relaunch needed."
+        alert.addButton(withTitle: "Open Menu Bar Settings")
+        alert.addButton(withTitle: "Later")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let candidates = [
+            "x-apple.systempreferences:com.apple.MenuBar-Settings.extension",
+            "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension"
+        ]
+        for candidate in candidates {
+            if let url = URL(string: candidate), NSWorkspace.shared.open(url) {
+                return
+            }
+        }
     }
 
     private func showOnboardingIfNeeded() {
