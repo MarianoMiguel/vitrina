@@ -12,6 +12,9 @@ final class CaptureRendererView: NSView {
     // painted the background; this gate drops them. Reopened by beginFrames()
     // when the next capture starts.
     private var acceptsFrames = true
+    // Retains the sample buffer whose IOSurface the layer is displaying so
+    // ScreenCaptureKit's buffer pool can't recycle it mid-composite.
+    private var displayedSampleBuffer: CMSampleBuffer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -59,6 +62,7 @@ final class CaptureRendererView: NSView {
     /// meeting participants see.
     func showBackground() {
         AppLogger.shared.log("renderer showBackground custom=\(PortalPreferences.customBackgroundURL?.lastPathComponent ?? "none")")
+        displayedSampleBuffer = nil
         if let image = backgroundImage() {
             layer?.contentsGravity = .resizeAspectFill
             layer?.contents = image
@@ -150,6 +154,20 @@ final class CaptureRendererView: NSView {
 
     nonisolated func display(sampleBuffer: CMSampleBuffer) {
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+
+        // Zero-copy path: hand the capture's IOSurface straight to the layer
+        // so WindowServer composites from the memory ScreenCaptureKit wrote
+        // into. Converting 4K frames through CIContext instead costs most of
+        // a core at 30fps.
+        if let surface = CVPixelBufferGetIOSurface(imageBuffer)?.takeUnretainedValue() {
+            Task { @MainActor in
+                guard self.acceptsFrames else { return }
+                self.layer?.contentsGravity = .resizeAspect
+                self.displayedSampleBuffer = sampleBuffer
+                self.layer?.contents = surface
+            }
             return
         }
 
