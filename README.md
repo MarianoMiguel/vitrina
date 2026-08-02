@@ -75,6 +75,19 @@ deactivated and joins all spaces; stronger Stage Manager flags are avoided
 because they can make the target disappear from some meeting apps' share
 pickers.
 
+## Development gotcha: launch with `open`, never the raw binary
+
+Always launch the app with `open dist/PeekPortal.app` (or Finder). Launching
+`Contents/MacOS/peekportal` directly from a terminal makes macOS 26 attribute
+the menu bar item to the *terminal* in ControlCenter's `trackedApplications`
+registry (`~/Library/Group Containers/group.com.apple.controlcenter/`). If the
+terminal's own menu bar icon is set to hidden, every item attributed to it is
+silently blocked — the status item registers successfully but gets parked
+off-screen, and the app's own "Show in Menu Bar" toggle cannot fix it. The app
+detects this parked state at launch and points users at System Settings >
+Menu Bar; repairing a poisoned attribution requires editing the registry
+(Full Disk Access) or removing the terminal's hidden state.
+
 ## Debug logs
 
 The app writes verbose diagnostics to:
