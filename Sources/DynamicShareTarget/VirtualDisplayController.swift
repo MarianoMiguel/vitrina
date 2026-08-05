@@ -16,6 +16,7 @@ final class VirtualDisplayController {
     private var renderer: CaptureRendererView?
     private var currentSize: CGSize
     private var repinObservers: [NSObjectProtocol] = []
+    private var lastRequestedCornerOrigin: CGPoint?
 
     var displayID: CGDirectDisplayID {
         display.displayID
@@ -87,7 +88,104 @@ final class VirtualDisplayController {
             self.window = window
             self.renderer = renderer
             self.observeForRepinning(window)
+            self.repositionDisplayIfNeeded(reason: "initial placement")
             completion(renderer)
+        }
+    }
+
+    // macOS insists that every display in the arrangement touches another, and
+    // the cursor can cross any shared edge. Touching a real display at a
+    // single corner satisfies the arrangement rule while leaving no edge for
+    // the cursor to wander across.
+    private func repositionDisplayIfNeeded(reason: String) {
+        let displayID = display.displayID
+        guard displayID != CGMainDisplayID() else { return }
+
+        let bounds = CGDisplayBounds(displayID)
+        guard !bounds.isEmpty else { return }
+
+        let realDisplays = activeDisplayBounds(excluding: displayID)
+        guard !realDisplays.isEmpty else { return }
+
+        guard let target = cornerOnlyOrigin(size: bounds.size, among: realDisplays) else {
+            AppLogger.shared.log("repositionDisplay reason=\(reason) no corner-only position available")
+            return
+        }
+        if bounds.origin == target {
+            lastRequestedCornerOrigin = nil
+            return
+        }
+        // If the system already refused this origin once, don't insist —
+        // re-requesting on every reconfiguration would loop forever.
+        guard target != lastRequestedCornerOrigin else { return }
+        lastRequestedCornerOrigin = target
+
+        var configRef: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&configRef) == .success, let configRef else {
+            AppLogger.shared.log("repositionDisplay reason=\(reason) failed to begin configuration")
+            return
+        }
+        guard CGConfigureDisplayOrigin(
+            configRef,
+            displayID,
+            Int32(target.x.rounded()),
+            Int32(target.y.rounded())
+        ) == .success else {
+            AppLogger.shared.log("repositionDisplay reason=\(reason) failed to set origin")
+            CGCancelDisplayConfiguration(configRef)
+            return
+        }
+        let result = CGCompleteDisplayConfiguration(configRef, .forSession)
+        AppLogger.shared.log("repositionDisplay reason=\(reason) from=\(bounds.origin) to=\(target) result=\(result.rawValue)")
+    }
+
+    // Finds a position diagonally off a display corner (main display first)
+    // that overlaps no real display and shares no edge segment with one.
+    private func cornerOnlyOrigin(size: CGSize, among displays: [CGRect]) -> CGPoint? {
+        let mainBounds = CGDisplayBounds(CGMainDisplayID())
+        let anchors = displays.filter { $0 == mainBounds } + displays.filter { $0 != mainBounds }
+        for anchor in anchors {
+            let candidates = [
+                CGPoint(x: anchor.minX - size.width, y: anchor.maxY),
+                CGPoint(x: anchor.minX - size.width, y: anchor.minY - size.height),
+                CGPoint(x: anchor.maxX, y: anchor.maxY),
+                CGPoint(x: anchor.maxX, y: anchor.minY - size.height)
+            ]
+            for origin in candidates {
+                let rect = CGRect(origin: origin, size: size)
+                if isCornerOnlyPlacement(rect, among: displays) {
+                    return origin
+                }
+            }
+        }
+        return nil
+    }
+
+    private func isCornerOnlyPlacement(_ rect: CGRect, among displays: [CGRect]) -> Bool {
+        for other in displays {
+            let overlapsX = rect.minX < other.maxX && other.minX < rect.maxX
+            let overlapsY = rect.minY < other.maxY && other.minY < rect.maxY
+            if overlapsX && overlapsY {
+                return false
+            }
+            let sharesVerticalEdge = (rect.maxX == other.minX || rect.minX == other.maxX) && overlapsY
+            let sharesHorizontalEdge = (rect.maxY == other.minY || rect.minY == other.maxY) && overlapsX
+            if sharesVerticalEdge || sharesHorizontalEdge {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func activeDisplayBounds(excluding excluded: CGDirectDisplayID) -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).compactMap { id in
+            guard id != excluded else { return nil }
+            let bounds = CGDisplayBounds(id)
+            return bounds.isEmpty ? nil : bounds
         }
     }
 
@@ -112,6 +210,7 @@ final class VirtualDisplayController {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.repositionDisplayIfNeeded(reason: "screen parameters changed")
                     self?.repinTargetWindowIfNeeded(reason: "screen parameters changed")
                 }
             }
