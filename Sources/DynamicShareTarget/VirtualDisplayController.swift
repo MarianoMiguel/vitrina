@@ -15,6 +15,7 @@ final class VirtualDisplayController {
     private var window: NSWindow?
     private var renderer: CaptureRendererView?
     private var currentSize: CGSize
+    private var repinObservers: [NSObjectProtocol] = []
 
     var displayID: CGDirectDisplayID {
         display.displayID
@@ -85,8 +86,48 @@ final class VirtualDisplayController {
 
             self.window = window
             self.renderer = renderer
+            self.observeForRepinning(window)
             completion(renderer)
         }
+    }
+
+    // AppKit can relocate the target window onto a real display during Space
+    // transitions (e.g. another app entering full screen), leaving it covering
+    // the user's screen. Snap it back to the virtual display whenever its
+    // screen or the display arrangement changes.
+    private func observeForRepinning(_ window: NSWindow) {
+        repinObservers = [
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeScreenNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.repinTargetWindowIfNeeded(reason: "window changed screen")
+                }
+            },
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.repinTargetWindowIfNeeded(reason: "screen parameters changed")
+                }
+            }
+        ]
+    }
+
+    private func repinTargetWindowIfNeeded(reason: String) {
+        guard let window else { return }
+        guard let screen = screenForDisplayID(display.displayID) else {
+            AppLogger.shared.log("repinTargetWindow reason=\(reason) skipped: virtual screen unavailable")
+            return
+        }
+        guard window.screen !== screen || window.frame != screen.frame else { return }
+        AppLogger.shared.log("repinTargetWindow reason=\(reason) from=\(window.frame) to=\(screen.frame)")
+        window.setFrame(screen.frame, display: true)
+        window.orderFrontRegardless()
     }
 
     func resizeTarget(to requestedSize: CGSize, reason: String, completion: @escaping (CGSize) -> Void) {
@@ -236,4 +277,12 @@ private extension CGSize {
 private final class VirtualDisplayTargetWindow: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // The default implementation constrains windows onto a visible screen,
+    // which pulls this window off the virtual display and onto the user's
+    // screen during full-screen Space transitions. The window must stay
+    // exactly on the virtual display, wherever the arrangement puts it.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 }
