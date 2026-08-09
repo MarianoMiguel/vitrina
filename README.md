@@ -40,7 +40,7 @@ The idea comes from [niri](https://github.com/niri-wm/niri)'s dynamic cast targe
   - Block list: apps that never appear in a monitor share, even when on screen.
   - Allow-list mode: block everything except apps you pick; sharing an unlisted window offers to add it, optionally automatically.
 - **Precise cursor** — window shares show the pointer only while it's actually over the shared window.
-- **HiDPI output** — the virtual display runs at 2x and physically resizes to match the source's aspect ratio, so portrait windows aren't letterboxed into 16:9 and Retina text stays crisp (up to 3840×2160).
+- **HiDPI output** — the virtual display is a fixed 1920×1080 at 2x, a full 3840×2160 pixel canvas, so Retina text stays crisp and even a maxed-out 4K window fits without losing detail. The resolution never changes mid-share — meeting apps freeze or rescale when a shared display resizes — so sources with a different aspect ratio are letterboxed instead.
 - **Custom backdrop** — between shares, participants see your wallpaper or an image of your choice.
 - **Stage Manager aware** — macOS only delivers frames for on-stage windows, so when Stage Manager is on, Vitrina switches window sharing to Follow Focus automatically instead of letting the share freeze.
 

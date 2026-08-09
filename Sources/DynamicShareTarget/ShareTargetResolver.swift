@@ -73,6 +73,11 @@ struct PickerContent {
 }
 
 final class ShareTargetResolver {
+    /// Floors out palettes, tooltips, and other chrome that apps report as
+    /// focused windows (Acrobat's 66×20 "Window" tooltip took down a live
+    /// share). Real document windows are comfortably larger.
+    static let minimumShareableSize = CGSize(width: 200, height: 150)
+
     func focusedWindow() async throws -> WindowTarget {
         AppLogger.shared.log("resolver.focusedWindow begin")
         let content = try await shareableContent()
@@ -156,7 +161,7 @@ final class ShareTargetResolver {
         where window.owningApplication?.processID != ownProcessID
             && window.isOnScreen
             && window.windowLayer == 0
-            && window.frame.area >= 1 {
+            && Self.isShareableSize(window.frame.size) {
             windowsByID[window.windowID] = window
         }
 
@@ -249,39 +254,27 @@ final class ShareTargetResolver {
 
     private func focusedAXWindowInfo() throws -> FocusedAXWindowInfo {
         AppLogger.shared.log("focusedAXWindowInfo begin")
+        // The system-wide element does not support kAXFocusedWindowAttribute
+        // (it always fails with kAXErrorAttributeUnsupported); ask for the
+        // focused UI element and walk up to its window instead.
         let systemWide = AXUIElementCreateSystemWide()
         var focusedValue: CFTypeRef?
         let focusedError = AXUIElementCopyAttributeValue(
             systemWide,
-            kAXFocusedWindowAttribute as CFString,
+            kAXFocusedUIElementAttribute as CFString,
             &focusedValue
         )
         AppLogger.shared.log("focusedAXWindowInfo systemWide focusedError=\(focusedError.rawValue) hasValue=\(focusedValue != nil)")
 
-        var axWindow = axElement(from: focusedValue)
-        if focusedError != .success || axWindow == nil,
-           let frontmostProcessID {
+        var axWindow: AXUIElement?
+        if focusedError == .success, let element = axElement(from: focusedValue) {
+            axWindow = windowElement(containing: element)
+            AppLogger.shared.log("focusedAXWindowInfo systemWide hasWindow=\(axWindow != nil)")
+        }
+
+        if axWindow == nil, let frontmostProcessID {
             AppLogger.shared.log("focusedAXWindowInfo falling back frontmost pid=\(frontmostProcessID)")
-            let appElement = AXUIElementCreateApplication(frontmostProcessID)
-            var appFocusedValue: CFTypeRef?
-            if AXUIElementCopyAttributeValue(
-                appElement,
-                kAXFocusedWindowAttribute as CFString,
-                &appFocusedValue
-            ) == .success {
-                axWindow = axElement(from: appFocusedValue)
-                AppLogger.shared.log("focusedAXWindowInfo app focused hasWindow=\(axWindow != nil)")
-            } else {
-                var mainValue: CFTypeRef?
-                if AXUIElementCopyAttributeValue(
-                    appElement,
-                    kAXMainWindowAttribute as CFString,
-                    &mainValue
-                ) == .success {
-                    axWindow = axElement(from: mainValue)
-                    AppLogger.shared.log("focusedAXWindowInfo app main hasWindow=\(axWindow != nil)")
-                }
-            }
+            axWindow = appWindow(for: frontmostProcessID)
         }
 
         guard let axWindow else {
@@ -289,6 +282,32 @@ final class ShareTargetResolver {
             throw DynamicShareTargetError.focusedWindowUnavailable
         }
 
+        var info = try windowInfo(for: axWindow)
+
+        // Focus can live in a palette or tooltip (Acrobat's toolbars); those
+        // are never what the user means to share. Retarget to the app's main
+        // window when the focused one is implausibly small.
+        if let size = info.frame?.size, !Self.isShareableSize(size) {
+            AppLogger.shared.log("focusedAXWindowInfo focused window too small size=\(size); trying app main window")
+            guard let mainWindow = mainWindow(for: info.processID),
+                  let mainInfo = try? windowInfo(for: mainWindow),
+                  Self.isShareableSize(mainInfo.frame?.size) else {
+                AppLogger.shared.log("focusedAXWindowInfo no shareable main window either")
+                throw DynamicShareTargetError.focusedWindowUnavailable
+            }
+            info = mainInfo
+        }
+
+        AppLogger.shared.log("focusedAXWindowInfo success pid=\(info.processID) title=\(info.title ?? "") frame=\(String(describing: info.frame))")
+        return info
+    }
+
+    static func isShareableSize(_ size: CGSize?) -> Bool {
+        guard let size else { return true }
+        return size.width >= minimumShareableSize.width && size.height >= minimumShareableSize.height
+    }
+
+    private func windowInfo(for axWindow: AXUIElement) throws -> FocusedAXWindowInfo {
         var processID: pid_t = 0
         let pidError = AXUIElementGetPid(axWindow, &processID)
         guard pidError == .success, processID > 0 else {
@@ -304,8 +323,51 @@ final class ShareTargetResolver {
                 .map { CGRect(origin: position, size: $0) }
         }
 
-        AppLogger.shared.log("focusedAXWindowInfo success pid=\(processID) title=\(title ?? "") frame=\(String(describing: frame))")
         return FocusedAXWindowInfo(processID: processID, title: title, frame: frame)
+    }
+
+    private func windowElement(containing element: AXUIElement) -> AXUIElement? {
+        if stringValue(for: element, attribute: kAXRoleAttribute as CFString) == kAXWindowRole {
+            return element
+        }
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &value) == .success,
+           let window = axElement(from: value) {
+            return window
+        }
+        if AXUIElementCopyAttributeValue(element, kAXTopLevelUIElementAttribute as CFString, &value) == .success,
+           let window = axElement(from: value) {
+            return window
+        }
+        return nil
+    }
+
+    private func appWindow(for processID: pid_t) -> AXUIElement? {
+        let appElement = AXUIElementCreateApplication(processID)
+        var focusedValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedValue
+        ) == .success, let window = axElement(from: focusedValue) {
+            AppLogger.shared.log("focusedAXWindowInfo app focused hasWindow=true")
+            return window
+        }
+        return mainWindow(for: processID)
+    }
+
+    private func mainWindow(for processID: pid_t) -> AXUIElement? {
+        let appElement = AXUIElementCreateApplication(processID)
+        var mainValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement,
+            kAXMainWindowAttribute as CFString,
+            &mainValue
+        ) == .success, let window = axElement(from: mainValue) else {
+            return nil
+        }
+        AppLogger.shared.log("focusedAXWindowInfo app main hasWindow=true")
+        return window
     }
 
     private func candidateWindows(in content: SCShareableContent, processID: pid_t) -> [SCWindow] {
@@ -315,6 +377,7 @@ final class ShareTargetResolver {
             .filter { $0.owningApplication?.processID != ownProcessID }
             .filter { $0.isOnScreen }
             .filter { $0.windowLayer == 0 }
+            .filter { Self.isShareableSize($0.frame.size) }
     }
 
     private func topmostShareableWindow(in content: SCShareableContent, processID: pid_t?) -> SCWindow? {
@@ -334,7 +397,8 @@ final class ShareTargetResolver {
                   info.isOnScreen,
                   let window = windowsByID[windowID],
                   window.isOnScreen,
-                  window.windowLayer == 0 else {
+                  window.windowLayer == 0,
+                  Self.isShareableSize(window.frame.size) else {
                 continue
             }
 
@@ -349,6 +413,7 @@ final class ShareTargetResolver {
             }
             .filter { $0.isOnScreen }
             .filter { $0.windowLayer == 0 }
+            .filter { Self.isShareableSize($0.frame.size) }
 
         let fallback = candidates.max { $0.frame.area < $1.frame.area }
         AppLogger.shared.log("topmostShareableWindow fallback candidates=\(candidates.count) selected=\(fallback?.windowID.description ?? "nil")")

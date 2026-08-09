@@ -67,11 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             AppLogger.shared.log("creating virtual display")
-            let virtualDisplayController = try VirtualDisplayController(
-                name: appName,
-                width: 1920,
-                height: 1080
-            )
+            let virtualDisplayController = try VirtualDisplayController(name: appName)
             self.virtualDisplayController = virtualDisplayController
 
             virtualDisplayController.prepareTargetWindow { [weak self] renderer in
@@ -80,16 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 self.captureController = CaptureController(
                     renderer: renderer,
-                    outputSize: CGSize(width: 1920, height: 1080),
+                    outputSize: VirtualDisplayController.fixedSize,
                     excludedDisplayIDs: [virtualDisplayController.displayID],
                     pixelScale: virtualDisplayController.pixelScale,
-                    resizeTarget: { requestedSize, reason, completion in
-                        virtualDisplayController.resizeTarget(
-                            to: requestedSize,
-                            reason: reason,
-                            completion: completion
-                        )
-                    },
                     statusHandler: { [weak self] status in
                         Task { @MainActor in self?.updateStatus(status) }
                     },
@@ -104,20 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 renderer.showBackground()
                 self.updateStatus(PermissionController.permissionSummary())
                 self.showOnboardingIfNeeded()
-
-                // Diagnostic hook: VITRINA_TEST_RESIZE=WxH exercises the
-                // virtual display resize without needing a capture source.
-                if let spec = ProcessInfo.processInfo.environment["VITRINA_TEST_RESIZE"] {
-                    let parts = spec.lowercased().split(separator: "x").compactMap { Double($0) }
-                    if parts.count == 2 {
-                        virtualDisplayController.resizeTarget(
-                            to: CGSize(width: parts[0], height: parts[1]),
-                            reason: "env test"
-                        ) { size in
-                            AppLogger.shared.log("VITRINA_TEST_RESIZE requested=\(spec) result=\(size)")
-                        }
-                    }
-                }
             }
         } catch {
             AppLogger.shared.log("virtual display failed error=\(error.localizedDescription)")

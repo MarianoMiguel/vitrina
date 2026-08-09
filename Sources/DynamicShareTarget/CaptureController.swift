@@ -11,14 +11,11 @@ struct ShareSourceInfo {
 
 @MainActor
 final class CaptureController: NSObject {
-    typealias ResizeTargetHandler = (_ requestedSize: CGSize, _ reason: String, _ completion: @escaping (CGSize) -> Void) -> Void
-
     private let renderer: CaptureRendererView
     private let resolver = ShareTargetResolver()
-    private let initialOutputSize: CGSize
+    private let outputSize: CGSize
     private let excludedDisplayIDs: Set<CGDirectDisplayID>
     private let pixelScale: CGFloat
-    private let resizeTarget: ResizeTargetHandler
     private let outputQueue = DispatchQueue(label: "\(AppMetadata.bundleIdentifier).screen-output", qos: .userInteractive)
     private let statusHandler: (String) -> Void
     private let sourceHandler: (ShareSourceInfo?) -> Void
@@ -35,6 +32,10 @@ final class CaptureController: NSObject {
     private var currentStream: SCStream?
     private var currentOutput: StreamOutput?
     private var currentConfiguration: SCStreamConfiguration?
+    private var currentSourceName: String?
+    private var currentSourceInfo: ShareSourceInfo?
+    private var currentWindowID: CGWindowID?
+    private var currentDisplayID: CGDirectDisplayID?
     private var cursorPolicy: CursorPolicy = .always
     private var cursorTimer: Timer?
     private var captureRequestID = 0
@@ -46,15 +47,13 @@ final class CaptureController: NSObject {
         outputSize: CGSize,
         excludedDisplayIDs: Set<CGDirectDisplayID>,
         pixelScale: CGFloat,
-        resizeTarget: @escaping ResizeTargetHandler,
         statusHandler: @escaping (String) -> Void,
         sourceHandler: @escaping (ShareSourceInfo?) -> Void
     ) {
         self.renderer = renderer
-        self.initialOutputSize = outputSize
+        self.outputSize = outputSize
         self.excludedDisplayIDs = excludedDisplayIDs
         self.pixelScale = pixelScale
-        self.resizeTarget = resizeTarget
         self.statusHandler = statusHandler
         self.sourceHandler = sourceHandler
         super.init()
@@ -91,7 +90,9 @@ final class CaptureController: NSObject {
                             title: target.description,
                             icon: Self.appIcon(for: target.window.owningApplication?.processID)
                         ),
-                        cursorPolicy: .whenOverWindow(target.window.windowID)
+                        cursorPolicy: .whenOverWindow(target.window.windowID),
+                        windowID: target.window.windowID,
+                        displayID: nil
                     )
                 }
             } catch {
@@ -127,7 +128,9 @@ final class CaptureController: NSObject {
                         sourceName: target.description,
                         sourceSize: target.captureSize,
                         sourceInfo: ShareSourceInfo(title: target.description, icon: Self.displaySymbolIcon()),
-                        cursorPolicy: .always
+                        cursorPolicy: .always,
+                        windowID: nil,
+                        displayID: target.display.displayID
                     )
                 }
             } catch {
@@ -167,7 +170,9 @@ final class CaptureController: NSObject {
                             title: target.description,
                             icon: Self.appIcon(for: target.window.owningApplication?.processID)
                         ),
-                        cursorPolicy: .whenOverWindow(target.window.windowID)
+                        cursorPolicy: .whenOverWindow(target.window.windowID),
+                        windowID: target.window.windowID,
+                        displayID: nil
                     )
                 }
             } catch {
@@ -201,7 +206,9 @@ final class CaptureController: NSObject {
                         sourceName: target.description,
                         sourceSize: target.captureSize,
                         sourceInfo: ShareSourceInfo(title: target.description, icon: Self.displaySymbolIcon()),
-                        cursorPolicy: .always
+                        cursorPolicy: .always,
+                        windowID: nil,
+                        displayID: target.display.displayID
                     )
                 }
             } catch {
@@ -241,7 +248,9 @@ final class CaptureController: NSObject {
                             title: target.description,
                             icon: Self.appIcon(for: target.window.owningApplication?.processID)
                         ),
-                        cursorPolicy: .whenOverWindow(target.window.windowID)
+                        cursorPolicy: .whenOverWindow(target.window.windowID),
+                        windowID: target.window.windowID,
+                        displayID: nil
                     )
                 }
             } catch {
@@ -278,7 +287,7 @@ final class CaptureController: NSObject {
     }
 
     func showTestPattern() {
-        AppLogger.shared.log("showTestPattern initialOutputSize=\(initialOutputSize)")
+        AppLogger.shared.log("showTestPattern outputSize=\(outputSize)")
         captureRequestID += 1
         activeWindowID = nil
         activeDisplayID = nil
@@ -386,53 +395,20 @@ final class CaptureController: NSObject {
         sourceName: String,
         sourceSize: CGSize,
         sourceInfo: ShareSourceInfo,
-        cursorPolicy: CursorPolicy
+        cursorPolicy: CursorPolicy,
+        windowID: CGWindowID?,
+        displayID: CGDirectDisplayID?
     ) {
         AppLogger.shared.log("startCapture source=\(sourceName) sourceSize=\(sourceSize)")
         captureRequestID += 1
         let requestID = captureRequestID
-        stopCurrentStream()
 
-        resizeTarget(sourceSize, sourceName) { [weak self] outputSize in
-            Task { @MainActor in
-                guard let self else { return }
-                guard requestID == self.captureRequestID else {
-                    AppLogger.shared.log("startCapture stale resize completion ignored requestID=\(requestID) active=\(self.captureRequestID)")
-                    return
-                }
-                self.startCaptureAfterResize(
-                    requestID: requestID,
-                    filter: filter,
-                    sourceName: sourceName,
-                    sourceSize: sourceSize,
-                    outputSize: outputSize,
-                    sourceInfo: sourceInfo,
-                    cursorPolicy: cursorPolicy
-                )
-            }
-        }
-    }
-
-    private func startCaptureAfterResize(
-        requestID: Int,
-        filter: SCContentFilter,
-        sourceName: String,
-        sourceSize: CGSize,
-        outputSize: CGSize,
-        sourceInfo: ShareSourceInfo,
-        cursorPolicy: CursorPolicy
-    ) {
-        guard requestID == captureRequestID else {
-            AppLogger.shared.log("startCaptureAfterResize stale request ignored requestID=\(requestID) active=\(captureRequestID)")
-            return
-        }
-
-        // Size the stream to the SOURCE aspect fitted into the display, not
-        // to the display itself: if a display resize ever fails, a mismatched
-        // buffer would make ScreenCaptureKit anchor the content top-left.
-        // With a source-aspect buffer the renderer letterboxes it centered.
+        // The stream buffer keeps the SOURCE aspect fitted into the fixed
+        // canvas; the renderer letterboxes it centered. The canvas itself
+        // never changes size, so meeting apps sharing the display never see
+        // a resolution change.
         let streamSize = Self.streamSize(for: sourceSize, fitting: outputSize)
-        AppLogger.shared.log("startCaptureAfterResize requestID=\(requestID) source=\(sourceName) outputSize=\(outputSize) streamSize=\(streamSize)")
+        AppLogger.shared.log("startCapture requestID=\(requestID) source=\(sourceName) outputSize=\(outputSize) streamSize=\(streamSize)")
 
         let configuration = SCStreamConfiguration()
         configuration.width = Int((streamSize.width * pixelScale).rounded())
@@ -450,7 +426,6 @@ final class CaptureController: NSObject {
         }
         AppLogger.shared.log("stream configuration width=\(configuration.width) height=\(configuration.height) queueDepth=\(configuration.queueDepth)")
 
-        renderer.beginFrames()
         let output = StreamOutput(renderer: renderer)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         AppLogger.shared.log("SCStream created")
@@ -460,42 +435,109 @@ final class CaptureController: NSObject {
             AppLogger.shared.log("SCStream output added")
         } catch {
             AppLogger.shared.log("addStreamOutput failed error=\(error.localizedDescription)")
-            presentCaptureFailure(prefix: "Capture output failed", error: error)
+            presentSwitchFailure(prefix: "Capture output failed", error: error)
             return
         }
 
-        currentOutput = output
-        currentStream = stream
-        currentConfiguration = configuration
-        self.cursorPolicy = cursorPolicy
-
+        // The previous stream keeps running until the new one is confirmed:
+        // a failed start must leave the meeting showing the old share, not
+        // dead air.
+        renderer.beginFrames()
         AppLogger.shared.log("SCStream startCapture begin")
         stream.startCapture { [weak self] error in
             Task { @MainActor in
-                guard let self else { return }
-                guard requestID == self.captureRequestID, self.currentStream === stream else {
-                    AppLogger.shared.log("SCStream startCapture completion ignored stale requestID=\(requestID)")
+                guard let self else {
+                    if error == nil { stream.stopCapture { _ in } }
+                    return
+                }
+                guard requestID == self.captureRequestID else {
+                    AppLogger.shared.log("SCStream startCapture superseded requestID=\(requestID) active=\(self.captureRequestID)")
+                    if error == nil { stream.stopCapture { _ in } }
                     return
                 }
 
                 if let error {
                     AppLogger.shared.log("SCStream startCapture failed error=\(error.localizedDescription)")
-                    self.presentCaptureFailure(prefix: "Capture failed", error: error)
-                    self.stopCurrentStream()
+                    self.presentSwitchFailure(prefix: "Capture failed", error: error)
                 } else {
                     AppLogger.shared.log("SCStream startCapture success source=\(sourceName)")
-                    self.statusHandler("Sharing \(sourceName)")
-                    self.sourceHandler(sourceInfo)
-                    self.startCursorTimerIfNeeded()
+                    self.adoptStream(
+                        stream,
+                        output: output,
+                        configuration: configuration,
+                        sourceName: sourceName,
+                        sourceInfo: sourceInfo,
+                        cursorPolicy: cursorPolicy,
+                        windowID: windowID,
+                        displayID: displayID
+                    )
                 }
             }
         }
+    }
+
+    /// Promotes a successfully started stream to current and retires the
+    /// previous one.
+    private func adoptStream(
+        _ stream: SCStream,
+        output: StreamOutput,
+        configuration: SCStreamConfiguration,
+        sourceName: String,
+        sourceInfo: ShareSourceInfo,
+        cursorPolicy: CursorPolicy,
+        windowID: CGWindowID?,
+        displayID: CGDirectDisplayID?
+    ) {
+        let previousStream = currentStream
+        let previousOutput = currentOutput
+
+        currentStream = stream
+        currentOutput = output
+        currentConfiguration = configuration
+        currentSourceName = sourceName
+        currentSourceInfo = sourceInfo
+        currentWindowID = windowID
+        currentDisplayID = displayID
+        activeWindowID = windowID
+        activeDisplayID = displayID
+        self.cursorPolicy = cursorPolicy
+
+        previousOutput?.detach()
+        if let previousStream {
+            AppLogger.shared.log("adoptStream stopping previous stream")
+            previousStream.stopCapture { error in
+                if let error {
+                    AppLogger.shared.log("stopCapture completion error=\(error.localizedDescription)")
+                } else {
+                    AppLogger.shared.log("stopCapture completion success")
+                }
+            }
+        }
+
+        statusHandler("Sharing \(sourceName)")
+        sourceHandler(sourceInfo)
+        startCursorTimerIfNeeded()
+    }
+
+    /// A switch that failed while an earlier share is still live keeps that
+    /// share untouched and only reports the failure; with nothing live it
+    /// falls back to the full failure presentation.
+    private func presentSwitchFailure(prefix: String, error: Error) {
+        guard let currentSourceName else {
+            presentCaptureFailure(prefix: prefix, error: error)
+            return
+        }
+        activeWindowID = currentWindowID
+        activeDisplayID = currentDisplayID
+        sourceHandler(currentSourceInfo)
+        statusHandler("\(prefix): \(error.localizedDescription) — still sharing \(currentSourceName)")
     }
 
     private func stopCurrentStream() {
         cursorTimer?.invalidate()
         cursorTimer = nil
         currentConfiguration = nil
+        clearCurrentSourceTracking()
 
         guard let stream = currentStream else {
             AppLogger.shared.log("stopCurrentStream no current stream")
@@ -513,6 +555,13 @@ final class CaptureController: NSObject {
                 AppLogger.shared.log("stopCapture completion success")
             }
         }
+    }
+
+    private func clearCurrentSourceTracking() {
+        currentSourceName = nil
+        currentSourceInfo = nil
+        currentWindowID = nil
+        currentDisplayID = nil
     }
 
     private func startCursorTimerIfNeeded() {
@@ -635,6 +684,14 @@ extension CaptureController: SCStreamDelegate {
                 AppLogger.shared.log("SCStream delegate ignored stale didStopWithError")
                 return
             }
+            // The stream is already dead; drop the references so a later
+            // switch failure can't claim this share is still live.
+            currentStream = nil
+            currentOutput = nil
+            currentConfiguration = nil
+            clearCurrentSourceTracking()
+            cursorTimer?.invalidate()
+            cursorTimer = nil
             presentCaptureFailure(prefix: "Capture stopped", error: error)
         }
     }
@@ -652,13 +709,22 @@ extension CaptureController: SCStreamDelegate {
     }
 }
 
-private final class StreamOutput: NSObject, SCStreamOutput {
+// @unchecked: the weak renderer reference is safe to read from any thread,
+// and frameCount is only touched on the sample handler queue.
+private final class StreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
     private weak var renderer: CaptureRendererView?
     private var frameCount = 0
 
     init(renderer: CaptureRendererView) {
         self.renderer = renderer
         super.init()
+    }
+
+    /// Stops delivering frames immediately. The retired stream stops
+    /// asynchronously, and its late frames must not overwrite the new
+    /// share's content.
+    func detach() {
+        renderer = nil
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {

@@ -39,4 +39,3 @@ Vitrina detects this parked state at launch and points users at System Settings 
 
 - `VITRINA_SKIP_VDISPLAY=1` — start without creating the virtual display.
 - `VITRINA_SKIP_TARGETWINDOW=1` — create the display but no target window.
-- `VITRINA_TEST_RESIZE=WxH` — exercise the virtual display resize at launch.
